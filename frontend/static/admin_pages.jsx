@@ -1,5 +1,5 @@
 // Admin Panel — full CRUD for events, mixes, tickets, campaigns, etc.
-const { useState, useEffect, useRef } = React;
+var { useState, useEffect, useRef } = React;
 
 const ADMIN_TABS = [
   { id: 'overview',   label: 'Overview' },

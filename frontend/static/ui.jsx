@@ -2,7 +2,7 @@
 // Exports: StarField, MiniPlayer, AuthModal, GlowButton, Chip, SectionHeader,
 //          FuturisticCard, EventCard, MixCard, TicketCard, VideoModal, Spinner
 
-const { useState, useEffect, useRef, useCallback } = React;
+var { useState, useEffect, useRef, useCallback } = React;
 
 /* ─── Star Field ─────────────────────────────────────────────────── */
 function StarField() {

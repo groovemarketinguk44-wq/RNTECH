@@ -1,5 +1,5 @@
 // Public pages: Home, Events, EventDetail, Mixes, Tickets, Contact
-const { useState, useEffect } = React;
+var { useState, useEffect } = React;
 
 /* ─── HOME ─────────────────────────────────────────────────────────── */
 function PageHome({ user, onAuth, onNavigate, onPlayMix, currentMix }) {

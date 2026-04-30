@@ -7,10 +7,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p /app/data /app/uploads/images /app/uploads/videos
+RUN mkdir -p /app/data
 
 ENV DATA_DIR=/app/data
-ENV UPLOAD_DIR=/app/uploads
+ENV UPLOAD_DIR=/app/data/uploads
 ENV FRONTEND_DIR=/app/frontend
 
 EXPOSE 8000

@@ -232,7 +232,7 @@ function TabEvents() {
           React.createElement('label', { style:labelSt },'Poster Image'),
           React.createElement('input', { type:'file',accept:'image/*',onChange:e=>setPosterFile(e.target.files[0]),style:{...FS,color:'rgba(255,255,255,0.6)',fontSize:13} })
         ),
-        React.createElement(GlowButton, { style:{width:'100%'},disabled:saving }, saving?'Saving…':editing?'Update Event':'Create Event')
+        React.createElement(GlowButton, { type:'submit',style:{width:'100%'},disabled:saving }, saving?'Saving…':editing?'Update Event':'Create Event')
       )
     ),
     // Ticket Types modal
@@ -254,7 +254,7 @@ function TabEvents() {
           React.createElement(AdminInput, { label:'Capacity',type:'number',value:ttForm.capacity,onChange:e=>setTtForm(f=>({...f,capacity:parseInt(e.target.value)||100})),min:1 })
         ),
         React.createElement(AdminInput, { label:'Description',value:ttForm.description,onChange:e=>setTtForm(f=>({...f,description:e.target.value})) }),
-        React.createElement(GlowButton, { style:{width:'100%'} },'Add Ticket Type')
+        React.createElement(GlowButton, { type:'submit',style:{width:'100%'} },'Add Ticket Type')
       )
     )
   );
@@ -362,7 +362,7 @@ function TabMixes() {
           )
         ),
         uploading&&React.createElement('div', { style:{...FS,color:'#3272a8',fontSize:13,marginBottom:12} },'Uploading '+uploading+', please wait…'),
-        React.createElement(GlowButton, { style:{width:'100%'},disabled:saving }, saving?'Saving…':editing?'Update Mix':'Create Mix')
+        React.createElement(GlowButton, { type:'submit',style:{width:'100%'},disabled:saving }, saving?'Saving…':editing?'Update Mix':'Create Mix')
       )
     )
   );
@@ -582,7 +582,7 @@ function TabCampaigns() {
             'Active (send to new signups)'
           )
         ),
-        React.createElement(GlowButton, { style:{width:'100%'},disabled:saving }, saving?'Saving…':editing?'Update Campaign':'Create Campaign')
+        React.createElement(GlowButton, { type:'submit',style:{width:'100%'},disabled:saving }, saving?'Saving…':editing?'Update Campaign':'Create Campaign')
       )
     )
   );
@@ -642,7 +642,7 @@ function TabSponsors() {
           React.createElement('label', { style:labelSt },'Logo Image'),
           React.createElement('input', { type:'file',accept:'image/*',onChange:e=>setLogoFile(e.target.files[0]),style:{...FS,color:'rgba(255,255,255,0.6)',fontSize:13} })
         ),
-        React.createElement(GlowButton, { style:{width:'100%'},disabled:saving }, saving?'Saving…':editing?'Update Sponsor':'Add Sponsor')
+        React.createElement(GlowButton, { type:'submit',style:{width:'100%'},disabled:saving }, saving?'Saving…':editing?'Update Sponsor':'Add Sponsor')
       )
     )
   );

@@ -111,15 +111,14 @@
 <script src="/static/api.js"></script>
 <script src="/static/auth.js"></script>
 
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 
-<script type="text/babel" src="/static/ui.jsx"></script>
-<script type="text/babel" src="/static/pages.jsx"></script>
-<script type="text/babel" src="/static/admin_pages.jsx"></script>
+<script src="/static/ui.jsx"></script>
+<script src="/static/pages.jsx"></script>
+<script src="/static/admin_pages.jsx"></script>
 
-<script type="text/babel">
+<script>
 const { useState, useEffect, useRef, useCallback } = React;
 
 const NAV_ITEMS = [

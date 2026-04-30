@@ -1,0 +1,12 @@
+{
+  "name": "RNTECH",
+  "short_name": "RNTECH",
+  "description": "RnB Meets Tech House — St Albans",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020810",
+  "theme_color": "#020810",
+  "icons": [
+    { "src": "/static/uploads/logo-transparent.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#020810" />
+  <title>RNTECH — RnB Meets Tech House</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      background: #020810;
+      color: #fff;
+      font-family: 'Space Grotesk', sans-serif;
+      overflow-x: hidden;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(50,114,168,0.3); border-radius: 2px; }
+    input, textarea, select, button { font-family: 'Space Grotesk', sans-serif; }
+
+    @keyframes btnGlow {
+      0%   { background-position: 0% 50%; }
+      50%  { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    @keyframes logoGlow {
+      from { filter: drop-shadow(0 0 20px rgba(50,114,168,0.6)) drop-shadow(0 0 40px rgba(6,182,212,0.3)); }
+      to   { filter: drop-shadow(0 0 40px rgba(50,114,168,1))   drop-shadow(0 0 80px rgba(6,182,212,0.6)) drop-shadow(0 0 120px rgba(99,102,241,0.4)); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .page-enter { animation: fadeIn 0.35s ease forwards; }
+
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      height: 64px;
+      background: rgba(5,3,16,0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 28px;
+    }
+    .nav-logo { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+    .nav-logo img { height: 32px; filter: drop-shadow(0 0 8px rgba(50,114,168,0.7)) drop-shadow(0 0 16px rgba(6,182,212,0.4)); }
+    .nav-links { display: flex; align-items: center; gap: 4px; }
+    .nav-link {
+      background: none; border: none; cursor: pointer;
+      font-size: 13px; font-weight: 600;
+      letter-spacing: 0.07em; text-transform: uppercase;
+      padding: 8px 14px;
+      color: rgba(255,255,255,0.55);
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-link:hover { color: #fff; background: rgba(255,255,255,0.06); }
+    .nav-link.active { color: #5a92c0; background: rgba(50,114,168,0.1); }
+    .nav-right { display: flex; align-items: center; gap: 10px; }
+    .nav-user-badge { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,0.6); }
+    .nav-user-dot { width: 8px; height: 8px; border-radius: 50%; background: #3272a8; box-shadow: 0 0 8px rgba(50,114,168,0.8); }
+
+    .mobile-nav {
+      display: none;
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(5,3,16,0.95);
+      border-top: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(20px);
+      padding: 10px 0 16px;
+    }
+    .mobile-nav-inner { display: flex; justify-content: space-around; align-items: center; }
+    .mobile-nav-item {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      background: none; border: none; cursor: pointer;
+      color: rgba(255,255,255,0.4);
+      font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 6px 12px; transition: color 0.15s;
+    }
+    .mobile-nav-item.active { color: #5a92c0; }
+    .mobile-nav-item .icon { font-size: 20px; line-height: 1; }
+
+    @media (max-width: 680px) {
+      nav .nav-links { display: none; }
+      nav .nav-right { display: none; }
+      .mobile-nav { display: block; }
+      body { padding-bottom: 70px; }
+    }
+
+    /* Hidden video for background audio — keeps playing when off-screen */
+    #bg-video {
+      position: fixed;
+      top: -9999px; left: -9999px;
+      width: 1px; height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- Persistent background audio video element -->
+<video id="bg-video" playsinline webkit-playsinline preload="metadata"></video>
+
+<script src="/static/api.js"></script>
+<script src="/static/auth.js"></script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="/static/ui.jsx"></script>
+<script type="text/babel" src="/static/pages.jsx"></script>
+<script type="text/babel" src="/static/admin_pages.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const NAV_ITEMS = [
+  { id: 'home',    label: 'Home',    icon: '⌂' },
+  { id: 'events',  label: 'Events',  icon: '◈' },
+  { id: 'mixes',   label: 'Mixes',   icon: '♫' },
+  { id: 'tickets', label: 'Tickets', icon: '◻' },
+  { id: 'contact', label: 'Contact', icon: '✉' },
+];
+
+function App() {
+  const [page, setPage] = useState('home');
+  const [user, setUser] = useState(() => window.RNTECH_AUTH.getUser());
+  const [authModal, setAuthModal] = useState(null);
+  const [currentMix, setCurrentMix] = useState(null);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [showVideoModal, setShowVideoModal] = useState(false);
+  const videoRef = useRef(document.getElementById('bg-video'));
+
+  // Restore session on load
+  useEffect(() => {
+    const token = window.RNTECH_AUTH.getToken();
+    if (token && !user) {
+      window.RNTECH_API.me().then(u => {
+        window.RNTECH_AUTH.setUser(u);
+        setUser(u);
+      }).catch(() => { window.RNTECH_AUTH.logout(); });
+    }
+  }, []);
+
+  // Play a mix — sets src on persistent video element
+  const handlePlayMix = useCallback((mix) => {
+    const vid = videoRef.current;
+    if (!vid) return;
+
+    if (currentMix && currentMix.id === mix.id) {
+      // Toggle play/pause
+      if (vid.paused) vid.play();
+      else vid.pause();
+      return;
+    }
+
+    setCurrentMix(mix);
+    setShowVideoModal(false);
+
+    if (mix.videoSrc) {
+      vid.src = mix.videoSrc;
+      vid.load();
+      vid.play().catch(() => {});
+    }
+
+    // Media Session API — lock screen + notification controls
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: mix.title,
+        artist: mix.residentName,
+        album: 'RNTECH',
+        artwork: mix.coverImage ? [{ src: mix.coverImage, sizes: '512x512', type: 'image/jpeg' }] : [],
+      });
+      navigator.mediaSession.setActionHandler('play',  () => vid.play());
+      navigator.mediaSession.setActionHandler('pause', () => vid.pause());
+      navigator.mediaSession.setActionHandler('stop',  () => { vid.pause(); setCurrentMix(null); });
+      navigator.mediaSession.setActionHandler('seekto', (d) => { if (d.seekTime !== undefined) vid.currentTime = d.seekTime; });
+    }
+  }, [currentMix]);
+
+  const handleCloseMix = useCallback(() => {
+    const vid = videoRef.current;
+    if (vid) { vid.pause(); vid.src = ''; }
+    setCurrentMix(null);
+    setShowVideoModal(false);
+  }, []);
+
+  const onAuth = useCallback((mode) => setAuthModal(mode), []);
+  const onAuthSuccess = useCallback((u) => { setUser(u); setAuthModal(null); }, []);
+  const onLogout = useCallback(() => { window.RNTECH_AUTH.logout(); setUser(null); }, []);
+  const onNavigate = useCallback((p) => { setPage(p); setShowAdmin(false); window.scrollTo(0, 0); }, []);
+
+  const activePage = showAdmin ? 'admin' : page;
+
+  const renderPage = () => {
+    const props = { user, onAuth, onNavigate, onPlayMix: handlePlayMix, currentMix };
+    switch (activePage) {
+      case 'home':    return React.createElement(PageHome, props);
+      case 'events':  return React.createElement(PageEvents, props);
+      case 'mixes':   return React.createElement(PageMixes, props);
+      case 'tickets': return React.createElement(PageTickets, props);
+      case 'contact': return React.createElement(PageContact, props);
+      case 'admin':   return React.createElement(PageAdmin, { user });
+      default:        return React.createElement(PageHome, props);
+    }
+  };
+
+  return React.createElement('div', null,
+    React.createElement(StarField),
+
+    // Desktop Nav
+    React.createElement('nav', null,
+      React.createElement('div', { className: 'nav-logo', onClick: () => { setPage('home'); setShowAdmin(false); } },
+        React.createElement('img', { src: '/static/uploads/logo-transparent.png', alt: 'RNTECH' })
+      ),
+      React.createElement('div', { className: 'nav-links' },
+        NAV_ITEMS.map(item =>
+          React.createElement('button', {
+            key: item.id,
+            className: 'nav-link' + (page === item.id && !showAdmin ? ' active' : ''),
+            onClick: () => onNavigate(item.id)
+          }, item.label)
+        ),
+        user && user.role === 'admin' &&
+          React.createElement('button', {
+            className: 'nav-link' + (showAdmin ? ' active' : ''),
+            onClick: () => setShowAdmin(s => !s)
+          }, 'Admin')
+      ),
+      React.createElement('div', { className: 'nav-right' },
+        user ? React.createElement('div', { className: 'nav-user-badge' },
+          React.createElement('div', { className: 'nav-user-dot' }),
+          React.createElement('span', null, user.name.split(' ')[0]),
+          React.createElement('button', {
+            onClick: onLogout,
+            style: { background:'none',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:'6px 12px',fontSize:12,fontWeight:600,letterSpacing:'0.05em',textTransform:'uppercase' }
+          }, 'Sign Out')
+        ) : React.createElement('div', { style: { display: 'flex', gap: 8 } },
+          React.createElement('button', {
+            onClick: () => onAuth('login'),
+            style: { background:'none',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'rgba(255,255,255,0.7)',cursor:'pointer',padding:'8px 16px',fontSize:13,fontWeight:600,letterSpacing:'0.05em',textTransform:'uppercase' }
+          }, 'Sign In'),
+          React.createElement('button', {
+            onClick: () => onAuth('register'),
+            style: { background:'#3272a8',border:'none',borderRadius:0,color:'#fff',cursor:'pointer',padding:'8px 16px',fontSize:13,fontWeight:700,letterSpacing:'0.05em',textTransform:'uppercase',boxShadow:'0 0 16px rgba(50,114,168,0.4)' }
+          }, 'Join')
+        )
+      )
+    ),
+
+    // Page content
+    React.createElement('main', { className: 'page-enter', key: activePage, style: { position: 'relative', zIndex: 1 } },
+      renderPage()
+    ),
+
+    // Mobile Nav
+    React.createElement('div', { className: 'mobile-nav' },
+      React.createElement('div', { className: 'mobile-nav-inner' },
+        NAV_ITEMS.map(item =>
+          React.createElement('button', {
+            key: item.id,
+            className: 'mobile-nav-item' + (page === item.id && !showAdmin ? ' active' : ''),
+            onClick: () => onNavigate(item.id)
+          },
+            React.createElement('span', { className: 'icon' }, item.icon),
+            item.label
+          )
+        ),
+        user && user.role === 'admin' &&
+          React.createElement('button', {
+            className: 'mobile-nav-item' + (showAdmin ? ' active' : ''),
+            onClick: () => setShowAdmin(s => !s)
+          },
+            React.createElement('span', { className: 'icon' }, '⚙'),
+            'Admin'
+          )
+      )
+    ),
+
+    // Auth Modal
+    authModal && React.createElement(AuthModal, { mode: authModal, onClose: () => setAuthModal(null), onSuccess: onAuthSuccess }),
+
+    // Mini Player
+    currentMix && React.createElement(MiniPlayer, {
+      mix: currentMix,
+      videoRef,
+      onClose: handleCloseMix,
+      onWatch: () => setShowVideoModal(true),
+    }),
+
+    // Video Modal (video element moves here when open)
+    showVideoModal && currentMix && React.createElement(VideoModal, {
+      mix: currentMix,
+      videoRef,
+      onClose: () => setShowVideoModal(false),
+    }),
+
+    // Move video element into modal slot when open
+    showVideoModal && currentMix && React.createElement(VideoPortal, { videoRef })
+  );
+}
+
+// Moves the persistent <video> element into the modal slot
+function VideoPortal({ videoRef }) {
+  useEffect(() => {
+    const slot = document.getElementById('video-modal-slot');
+    const vid = videoRef.current;
+    if (!slot || !vid) return;
+    vid.style.cssText = 'position:static;width:100%;height:100%;object-fit:contain;top:auto;left:auto;opacity:1;';
+    slot.innerHTML = '';
+    slot.appendChild(vid);
+    return () => {
+      // Return to bg position on unmount
+      vid.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
+      document.body.appendChild(vid);
+    };
+  }, [videoRef]);
+  return null;
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App));
+</script>
+</body>
+</html>

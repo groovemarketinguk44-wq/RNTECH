@@ -42,9 +42,9 @@ events_data = [
     {
         "id": "evt-001",
         "title": "BANK HOLIDAY ROOFTOP",
-        "slug": "bank-holiday-rooftop-2025",
-        "date": "2025-05-25",
-        "display_date": "Sun 25th May 2025",
+        "slug": "bank-holiday-rooftop-2026",
+        "date": "2026-05-25",
+        "display_date": "Mon 25th May 2026",
         "start_time": "2:00 PM",
         "end_time": "11:00 PM",
         "venue": "The White Swan",
@@ -66,8 +66,8 @@ events_data = [
         "id": "evt-002",
         "title": "NYE LAUNCH",
         "slug": "nye-launch-2024",
-        "date": "2025-12-31",
-        "display_date": "Wed 31st Dec 2025",
+        "date": "2024-12-31",
+        "display_date": "Tue 31st Dec 2024",
         "start_time": "8:00 PM",
         "end_time": "11:00 PM",
         "venue": "The White Swan",
@@ -78,16 +78,23 @@ events_data = [
             {"name": "DJ MIDDO", "role": "Support"},
         ]),
         "giveaways_json": json.dumps(["NYE countdown", "Champagne toast at midnight"]),
-        "status": "upcoming",
+        "status": "past",
         "is_free": True,
         "featured": False,
     },
 ]
 
 for ed in events_data:
-    if not db.query(Event).filter(Event.id == ed["id"]).first():
+    e = db.query(Event).filter(Event.id == ed["id"]).first()
+    if not e:
         db.add(Event(**ed))
         print(f"✓ Event: {ed['title']}")
+    else:
+        e.date = ed["date"]
+        e.display_date = ed["display_date"]
+        e.status = ed["status"]
+        e.slug = ed["slug"]
+        print(f"  Updated event: {ed['title']}")
 
 db.commit()
 
@@ -133,16 +140,20 @@ db.commit()
 sponsors_data = [
     {"id": "sp-001", "name": "THE WHITE SWAN", "subtitle": "St Albans",
      "description": "Our home venue. Rooftop terrace, great drinks, and the perfect space.",
-     "logo_filename": None, "link": "#", "sort_order": 1},
+     "logo_filename": "/static/uploads/ws-transparent.png", "link": "#", "sort_order": 1},
     {"id": "sp-002", "name": "BREWTINI", "subtitle": "Premium Canned Cocktails",
      "description": "Premium canned cocktails. Your night, elevated.",
-     "logo_filename": None, "link": "#", "sort_order": 2},
+     "logo_filename": "/static/uploads/brew-transparent.png", "link": "#", "sort_order": 2},
 ]
 
 for sd in sponsors_data:
-    if not db.query(Sponsor).filter(Sponsor.id == sd["id"]).first():
+    s = db.query(Sponsor).filter(Sponsor.id == sd["id"]).first()
+    if not s:
         db.add(Sponsor(**sd))
         print(f"✓ Sponsor: {sd['name']}")
+    else:
+        s.logo_filename = sd["logo_filename"]
+        print(f"  Updated sponsor logo: {sd['name']}")
 
 db.commit()
 db.close()

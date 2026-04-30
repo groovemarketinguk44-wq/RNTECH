@@ -48,8 +48,8 @@ function PageHome({ user, onAuth, onNavigate, onPlayMix, currentMix }) {
       React.createElement(SectionHeader, { title:'Lineup', subtitle:featured.title+' · '+featured.displayDate }),
       React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16 } },
         featured.lineup.map(dj=>React.createElement(FuturisticCard, { key:dj.name,active:dj.role==='Headliner',style:{ textAlign:'center' } },
-          React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:'#fff',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:8 } }, dj.name),
-          React.createElement(Chip, { label:dj.role, color:dj.role==='Headliner'?'#3272a8':'#64748b' })
+          React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:'#fff',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:dj.role==='Headliner'?8:0 } }, dj.name),
+          dj.role==='Headliner'&&React.createElement(Chip, { label:'Headliner', color:'#3272a8' })
         ))
       )
     ),
@@ -182,8 +182,8 @@ function EventDetail({ event, user, onBack, onRegister }) {
       React.createElement('h2', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:22,color:'#fff',textTransform:'uppercase',marginBottom:20 } },'Lineup'),
       React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12,marginBottom:40 } },
         event.lineup.map(dj=>React.createElement(FuturisticCard, { key:dj.name,active:dj.role==='Headliner',style:{ textAlign:'center' } },
-          React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:'#fff',textTransform:'uppercase',marginBottom:8 } }, dj.name),
-          React.createElement(Chip, { label:dj.role, color:dj.role==='Headliner'?'#06b6d4':'#64748b' })
+          React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:'#fff',textTransform:'uppercase',marginBottom:dj.role==='Headliner'?8:0 } }, dj.name),
+          dj.role==='Headliner'&&React.createElement(Chip, { label:'Headliner', color:'#06b6d4' })
         ))
       )
     ),

@@ -14,10 +14,14 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
 
 
 def _sponsor_dict(s: Sponsor) -> dict:
+    if s.logo_filename:
+        logo = s.logo_filename if s.logo_filename.startswith('/') else f"/uploads/{s.logo_filename}"
+    else:
+        logo = None
     return {
         "id": s.id, "name": s.name, "subtitle": s.subtitle,
         "description": s.description,
-        "logo": f"/uploads/{s.logo_filename}" if s.logo_filename else None,
+        "logo": logo,
         "link": s.link, "active": s.active, "sortOrder": s.sort_order,
     }
 

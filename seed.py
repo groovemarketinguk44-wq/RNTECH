@@ -15,11 +15,24 @@ data_dir.mkdir(parents=True, exist_ok=True)
 (upload_dir / "images").mkdir(parents=True, exist_ok=True)
 (upload_dir / "videos").mkdir(parents=True, exist_ok=True)
 
+from sqlalchemy import text, inspect as sa_inspect
 from backend.database import engine, SessionLocal
 from backend.models import Base, User, Event, TicketType, Mix, Sponsor
 from backend.auth import hash_password
 
 Base.metadata.create_all(bind=engine)
+
+# Migrate existing DBs: add columns that didn't exist at initial deploy
+with engine.connect() as _conn:
+    try:
+        _cols = [c["name"] for c in sa_inspect(engine).get_columns("events")]
+        if "registration_mode" not in _cols:
+            _conn.execute(text("ALTER TABLE events ADD COLUMN registration_mode TEXT DEFAULT 'open'"))
+            _conn.commit()
+            print("✓ Migrated: added registration_mode to events")
+    except Exception as _e:
+        print(f"  Migration skipped: {_e}")
+
 db = SessionLocal()
 
 ADMIN_EMAIL = "ben@rntech.live"

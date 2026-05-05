@@ -50,10 +50,19 @@ window.RNTECH_API = (function () {
     updateTicketType: (id, data) => put('/admin/ticket-types/' + id, data),
     deleteTicketType: (id) => del('/admin/ticket-types/' + id),
 
+    // Event interest / waitlist
+    submitInterest: (eventId, data) => post('/events/' + eventId + '/interest', data),
+    adminGetInterest: (eventId) => get('/admin/interest/' + eventId),
+    approveInterest: (id) => put('/admin/interest/' + id + '/approve', {}),
+    rejectInterest: (id) => put('/admin/interest/' + id + '/reject', {}),
+
     // Tickets
     issueTicket: (data) => post('/tickets', data),
     myTickets: () => get('/tickets/my'),
     adminTickets: (eventId) => get('/admin/tickets' + (eventId ? '?event_id=' + eventId : '')),
+    adminIssueTicket: (data) => post('/admin/tickets', data),
+    searchTickets: (q, eventId) => get('/admin/tickets/search?q=' + encodeURIComponent(q) + (eventId ? '&event_id=' + eventId : '')),
+    checkinByQR: (qrCode) => post('/admin/tickets/checkin/' + encodeURIComponent(qrCode), {}),
     exportTickets: (eventId) => BASE + '/admin/tickets/export' + (eventId ? '?event_id=' + eventId : '') + '&_auth=' + (token() || ''),
     updateTicketStatus: (id, status) => put('/admin/tickets/' + id + '/status', { status }),
 

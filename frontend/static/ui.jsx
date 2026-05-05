@@ -158,7 +158,7 @@ function Chip({ label, color='#3272a8' }) {
 /* ─── Section Header ─────────────────────────────────────────────── */
 function SectionHeader({ title, subtitle }) {
   return React.createElement('div',{style:{marginBottom:40}},
-    React.createElement('h2',{style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:'clamp(28px,4vw,48px)',letterSpacing:'-0.02em',color:'#fff',margin:0,textTransform:'uppercase'}},title),
+    React.createElement('h2',{style:{fontFamily:"'Ethnocentric Rg','Orbitron','Space Grotesk',sans-serif",fontWeight:200,fontStretch:'expanded',fontSize:'clamp(24px,4vw,44px)',letterSpacing:'0.06em',color:'#fff',margin:0,textTransform:'uppercase'}},title),
     subtitle&&React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:16,marginTop:8}},subtitle)
   );
 }
@@ -188,7 +188,8 @@ function EventCard({ event, onSelect, onRegister }) {
       (event.description||'').substr(0,110)+(event.description&&event.description.length>110?'…':'')),
     React.createElement('div',{style:{display:'flex',gap:10}},
       React.createElement(GlowButton,{onClick:e=>{e.stopPropagation();onSelect(event);},small:true,variant:'ghost'},'View Event'),
-      event.status==='upcoming'&&React.createElement(GlowButton,{onClick:e=>{e.stopPropagation();onRegister(event);},small:true,variant:'primary'},event.isFree?'Get Free Ticket':'Buy Ticket')
+      event.status==='upcoming'&&React.createElement(GlowButton,{onClick:e=>{e.stopPropagation();onRegister(event);},small:true,variant:'primary'},
+        event.registrationMode==='interest'?'Register Interest':event.isFree?'Get Free Ticket':'Buy Ticket')
     )
   );
 }
@@ -218,7 +219,26 @@ function MixCard({ mix, onPlay, isPlaying }) {
 
 /* ─── Ticket Card ────────────────────────────────────────────────── */
 function TicketCard({ ticket }) {
+  const qrRef = React.useRef(null);
   const event = ticket.event || {};
+
+  React.useEffect(() => {
+    if (!qrRef.current || !ticket.qrCode) return;
+    qrRef.current.innerHTML = '';
+    if (typeof QRCode !== 'undefined') {
+      new QRCode(qrRef.current, {
+        text: ticket.qrCode,
+        width: 80,
+        height: 80,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H,
+      });
+    } else {
+      qrRef.current.textContent = ticket.qrCode;
+    }
+  }, [ticket.qrCode]);
+
   return React.createElement(FuturisticCard,{active:ticket.status==='valid'},
     React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20}},
       React.createElement('div',null,
@@ -226,7 +246,7 @@ function TicketCard({ ticket }) {
         React.createElement('h3',{style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:20,color:'#fff',margin:'8px 0 4px',textTransform:'uppercase'}},event.title||'Event Ticket'),
         React.createElement('div',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'#3272a8',fontSize:13,fontWeight:600}},ticket.ticketTypeName||'General Entry')
       ),
-      React.createElement('div',{style:{width:60,height:60,background:'#fff',display:'flex',alignItems:'center',justifyContent:'center',borderRadius:4,fontSize:8,fontFamily:'monospace',color:'#000',textAlign:'center',wordBreak:'break-all',padding:4}},ticket.qrCode)
+      React.createElement('div',{ref:qrRef,style:{width:80,height:80,background:'#fff',borderRadius:4,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:8,fontFamily:'monospace',color:'#000',padding:2}})
     ),
     React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
       [['HOLDER',ticket.holderName],['REF',ticket.id],['DATE',event.displayDate||'—'],['VENUE',event.venue||'—']].map(([label,val])=>

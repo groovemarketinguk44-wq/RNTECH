@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from sqlalchemy import text, inspect as sa_inspect
 from .database import engine, SessionLocal
 from .models import Base
 from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns
@@ -36,6 +37,16 @@ def _run_pending():
 async def lifespan(app: FastAPI):
     # Create tables
     Base.metadata.create_all(bind=engine)
+    # Migrate existing DBs: add columns added after initial deploy
+    with engine.connect() as conn:
+        inspector = sa_inspect(engine)
+        try:
+            event_cols = [c["name"] for c in inspector.get_columns("events")]
+            if "registration_mode" not in event_cols:
+                conn.execute(text("ALTER TABLE events ADD COLUMN registration_mode TEXT DEFAULT 'open'"))
+                conn.commit()
+        except Exception:
+            pass
     # Ensure upload dirs exist
     for sub in ("images", "videos"):
         (UPLOAD_DIR / sub).mkdir(parents=True, exist_ok=True)

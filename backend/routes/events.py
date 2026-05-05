@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 from ..database import get_db
-from ..models import Event, TicketType
+from ..models import Event, TicketType, EventInterest, Ticket
 from ..auth import require_admin
 
 router = APIRouter()
@@ -32,6 +32,7 @@ def _event_dict(e: Event) -> dict:
         "posterImage": f"/uploads/{e.poster_image}" if e.poster_image else None,
         "lineup": e.lineup, "giveaways": e.giveaways,
         "status": e.status, "isFree": e.is_free, "featured": e.featured,
+        "registrationMode": e.registration_mode or "open",
         "ticketTypes": [_tt_dict(tt) for tt in e.ticket_types],
     }
 
@@ -68,6 +69,7 @@ class EventIn(BaseModel):
     status: str = "upcoming"
     isFree: bool = True
     featured: bool = False
+    registrationMode: str = "open"
 
 
 @router.post("/admin/events")
@@ -89,6 +91,7 @@ def create_event(data: EventIn, db: Session = Depends(get_db), _=Depends(require
         status=data.status,
         is_free=data.isFree,
         featured=data.featured,
+        registration_mode=data.registrationMode,
     )
     db.add(e)
     db.commit()
@@ -114,6 +117,7 @@ def update_event(event_id: str, data: EventIn, db: Session = Depends(get_db), _=
     e.status = data.status
     e.is_free = data.isFree
     e.featured = data.featured
+    e.registration_mode = data.registrationMode
     db.commit()
     db.refresh(e)
     return _event_dict(e)
@@ -191,3 +195,88 @@ def delete_ticket_type(tt_id: str, db: Session = Depends(get_db), _=Depends(requ
         raise HTTPException(404, "Ticket type not found")
     db.delete(tt)
     db.commit()
+
+
+# ── Event Interest / Waitlist ─────────────────────────────────────────────────
+
+def _interest_dict(i: EventInterest) -> dict:
+    return {
+        "id": i.id, "eventId": i.event_id, "name": i.name, "email": i.email,
+        "message": i.message, "status": i.status, "createdAt": i.created_at.isoformat(),
+    }
+
+
+class InterestIn(BaseModel):
+    name: str
+    email: str
+    message: str = ""
+
+
+@router.post("/events/{event_id}/interest")
+def submit_interest(event_id: str, data: InterestIn, db: Session = Depends(get_db)):
+    e = db.query(Event).filter(Event.id == event_id).first()
+    if not e:
+        raise HTTPException(404, "Event not found")
+    existing = db.query(EventInterest).filter(
+        EventInterest.event_id == event_id, EventInterest.email == data.email
+    ).first()
+    if existing:
+        raise HTTPException(400, "You've already registered interest for this event")
+    interest = EventInterest(
+        event_id=event_id,
+        name=data.name,
+        email=data.email,
+        message=data.message,
+    )
+    db.add(interest)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/admin/interest/{event_id}")
+def get_interest(event_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    interests = db.query(EventInterest).filter(
+        EventInterest.event_id == event_id
+    ).order_by(EventInterest.created_at.desc()).all()
+    return [_interest_dict(i) for i in interests]
+
+
+@router.put("/admin/interest/{interest_id}/approve")
+def approve_interest(interest_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    i = db.query(EventInterest).filter(EventInterest.id == interest_id).first()
+    if not i:
+        raise HTTPException(404, "Not found")
+    i.status = "approved"
+    ticket_id = None
+    tt = db.query(TicketType).filter(
+        TicketType.event_id == i.event_id, TicketType.active == True
+    ).first()
+    if tt and tt.sold_count < tt.capacity:
+        t = Ticket(
+            ticket_type_id=tt.id,
+            event_id=i.event_id,
+            user_id=None,
+            holder_name=i.name,
+            holder_email=i.email,
+            qr_code=secrets.token_hex(6).upper(),
+            status="valid",
+        )
+        tt.sold_count += 1
+        db.add(t)
+        db.flush()
+        ticket_id = t.id
+    db.commit()
+    d = _interest_dict(i)
+    if ticket_id:
+        d["ticketId"] = ticket_id
+    return d
+
+
+@router.put("/admin/interest/{interest_id}/reject")
+def reject_interest(interest_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    i = db.query(EventInterest).filter(EventInterest.id == interest_id).first()
+    if not i:
+        raise HTTPException(404, "Not found")
+    i.status = "rejected"
+    db.commit()
+    return _interest_dict(i)

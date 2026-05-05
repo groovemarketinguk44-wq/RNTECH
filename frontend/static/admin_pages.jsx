@@ -6,6 +6,7 @@ const ADMIN_TABS = [
   { id: 'events',     label: 'Events' },
   { id: 'mixes',      label: 'Mixes' },
   { id: 'guestlist',  label: 'Guest List' },
+  { id: 'waitlist',   label: 'Waitlist' },
   { id: 'attendees',  label: 'Attendees' },
   { id: 'messages',   label: 'Messages' },
   { id: 'campaigns',  label: 'Email Campaigns' },
@@ -91,7 +92,7 @@ function TabEvents() {
   const [events, setEvents] = useState([]);
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title:'',date:'',displayDate:'',startTime:'',endTime:'',venue:'',location:'',description:'',lineup:'',giveaways:'',status:'upcoming',isFree:true,featured:false });
+  const [form, setForm] = useState({ title:'',date:'',displayDate:'',startTime:'',endTime:'',venue:'',location:'',description:'',lineup:'',giveaways:'',status:'upcoming',isFree:true,featured:false,registrationMode:'open' });
   const [saving, setSaving] = useState(false);
   const [posterFile, setPosterFile] = useState(null);
   const [ticketTypes, setTicketTypes] = useState([]);
@@ -103,7 +104,7 @@ function TabEvents() {
 
   const openNew = () => {
     setEditing(null);
-    setForm({ title:'',date:'',displayDate:'',startTime:'',endTime:'',venue:'The White Swan',location:'St Albans, Hertfordshire',description:'',lineup:'',giveaways:'',status:'upcoming',isFree:true,featured:false });
+    setForm({ title:'',date:'',displayDate:'',startTime:'',endTime:'',venue:'The White Swan',location:'St Albans, Hertfordshire',description:'',lineup:'',giveaways:'',status:'upcoming',isFree:true,featured:false,registrationMode:'open' });
     setPosterFile(null);
     setShowForm(true);
   };
@@ -117,6 +118,7 @@ function TabEvents() {
       lineup:(ev.lineup||[]).map(l=>l.name+(l.role?':'+l.role:'')).join('\n'),
       giveaways:(ev.giveaways||[]).join('\n'),
       status:ev.status, isFree:ev.isFree, featured:ev.featured,
+      registrationMode:ev.registrationMode||'open',
     });
     setPosterFile(null);
     setShowForm(true);
@@ -209,8 +211,11 @@ function TabEvents() {
         React.createElement(AdminTextarea, { label:'Description',value:form.description,onChange:e=>setForm(f=>({...f,description:e.target.value})),rows:3 }),
         React.createElement(AdminTextarea, { label:'Lineup (one per line: NAME:Role)',value:form.lineup,onChange:e=>setForm(f=>({...f,lineup:e.target.value})),rows:4,placeholder:'DJ MIDDO:Headliner\nBEN HENDERSON:Headliner\nDJ DAGZ:Support' }),
         React.createElement(AdminTextarea, { label:'Giveaways (one per line)',value:form.giveaways,onChange:e=>setForm(f=>({...f,giveaways:e.target.value})),rows:3,placeholder:'Free entry all night\nBrewtini sampling' }),
-        React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:14} },
+        React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14} },
           React.createElement(AdminSelect, { label:'Status',value:form.status,onChange:e=>setForm(f=>({...f,status:e.target.value})),options:[{value:'upcoming',label:'Upcoming'},{value:'past',label:'Past'}] }),
+          React.createElement(AdminSelect, { label:'Registration Mode',value:form.registrationMode,onChange:e=>setForm(f=>({...f,registrationMode:e.target.value})),options:[{value:'open',label:'Open — anyone can get tickets'},{value:'interest',label:'Interest Only — waitlist, admin picks'},{value:'closed',label:'Closed — no registration'}] })
+        ),
+        React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14} },
           React.createElement('div', null,
             React.createElement('label', { style:labelSt },'Free Entry'),
             React.createElement('div', { style:{display:'flex',gap:8,paddingTop:4} },
@@ -368,38 +373,118 @@ function TabMixes() {
   );
 }
 
+// ── QR Scanner Modal ──────────────────────────────────────────────────────────
+function QRScanModal({ onClose, onScan }) {
+  const html5QrRef = React.useRef(null);
+  const [error, setError] = React.useState('');
+  const [scanning, setScanning] = React.useState(false);
+
+  React.useEffect(() => {
+    if (typeof Html5Qrcode === 'undefined') { setError('QR scanner library not loaded.'); return; }
+    const scanner = new Html5Qrcode('qr-scanner-region');
+    html5QrRef.current = scanner;
+    scanner.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 240, height: 240 } },
+      (decoded) => { scanner.stop().catch(()=>{}); onScan(decoded); },
+      () => {}
+    ).then(() => setScanning(true)).catch(err => setError('Camera denied or unavailable: ' + (err || '')));
+    return () => { scanner.stop().catch(()=>{}); };
+  }, []);
+
+  const overlayStyle = { position:'fixed',inset:0,zIndex:600,background:'rgba(0,0,0,0.95)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:24 };
+  return React.createElement('div', { style:overlayStyle },
+    React.createElement('h3', { style:{...FS,fontWeight:800,fontSize:20,color:'#fff',margin:'0 0 20px',textTransform:'uppercase',letterSpacing:'0.06em'} }, 'Scan Ticket QR'),
+    React.createElement('div', { id:'qr-scanner-region', style:{width:280,height:280,background:'#000',border:'2px solid rgba(50,114,168,0.6)',borderRadius:4} }),
+    error && React.createElement('p', { style:{...FS,color:'#ef4444',fontSize:13,marginTop:16,textAlign:'center',maxWidth:300} }, error),
+    !scanning && !error && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13,marginTop:16} }, 'Starting camera…'),
+    scanning && !error && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13,marginTop:16} }, 'Point at QR code on ticket'),
+    React.createElement('div', { style:{marginTop:20} },
+      React.createElement(GlowButton, { onClick:()=>{ if(html5QrRef.current) html5QrRef.current.stop().catch(()=>{}); onClose(); }, variant:'ghost' }, 'Cancel')
+    )
+  );
+}
+
 // ── Guest List ────────────────────────────────────────────────────────────────
 function TabGuestList() {
   const [events, setEvents] = useState([]);
   const [selectedId, setSelectedId] = useState('');
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
+  const [guestName, setGuestName] = useState('');
+  const [guestEmail, setGuestEmail] = useState('');
+  const [guestTypeId, setGuestTypeId] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState('');
 
-  useEffect(() => { window.RNTECH_API.getEvents().then(ev=>{ setEvents(ev); if(ev.length) setSelectedId(ev[0].id); }).catch(()=>{}); },[]);
+  useEffect(() => {
+    window.RNTECH_API.getEvents().then(ev=>{ setEvents(ev); if(ev.length) setSelectedId(ev[0].id); }).catch(()=>{});
+  },[]);
+
   useEffect(() => {
     if (!selectedId) return;
     setLoading(true);
     window.RNTECH_API.adminTickets(selectedId).then(t=>{ setTickets(t); setLoading(false); }).catch(()=>setLoading(false));
   },[selectedId]);
 
+  const reload = () => window.RNTECH_API.adminTickets(selectedId).then(setTickets).catch(()=>{});
+
   const updateStatus = async (ticketId, status) => {
     await window.RNTECH_API.updateTicketStatus(ticketId, status).catch(err=>alert(err.message));
-    window.RNTECH_API.adminTickets(selectedId).then(setTickets).catch(()=>{});
+    reload();
+  };
+
+  const addGuest = async () => {
+    if (!guestName.trim() || !guestEmail.trim() || !guestTypeId) { setAddError('Fill all fields'); return; }
+    setAdding(true); setAddError('');
+    try {
+      await window.RNTECH_API.adminIssueTicket({ holderName:guestName.trim(), holderEmail:guestEmail.trim(), ticketTypeId:guestTypeId });
+      setGuestName(''); setGuestEmail(''); setGuestTypeId(''); setShowAdd(false);
+      reload();
+    } catch(err) {
+      setAddError(err.message || 'Failed to add guest');
+    } finally { setAdding(false); }
+  };
+
+  const handleScan = async (qrValue) => {
+    setShowScanner(false);
+    try {
+      const result = await window.RNTECH_API.checkinByQR(qrValue);
+      setScanResult(result);
+      reload();
+    } catch(err) {
+      setScanResult({ error: err.message || 'Ticket not found' });
+    }
   };
 
   const selectedEvent = events.find(e=>e.id===selectedId);
+  const ticketTypes = selectedEvent ? (selectedEvent.ticketTypes||[]).filter(t=>t.active) : [];
+  const filtered = tickets.filter(t => !search || t.holderName.toLowerCase().includes(search.toLowerCase()) || t.holderEmail.toLowerCase().includes(search.toLowerCase()));
+
+  const btnStyle = { ...FS,background:'rgba(100,116,139,0.2)',border:'1px solid rgba(100,116,139,0.3)',color:'#94a3b8',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em' };
+  const btnGreenStyle = { ...FS,background:'rgba(16,185,129,0.1)',border:'1px solid rgba(16,185,129,0.3)',color:'#10b981',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em' };
 
   return React.createElement('div', null,
-    React.createElement('div', { style:{display:'flex',gap:16,alignItems:'center',marginBottom:24,flexWrap:'wrap'} },
-      React.createElement('select', { value:selectedId, onChange:e=>setSelectedId(e.target.value), style:{...inputSt,width:'auto',marginBottom:0,minWidth:220} },
+    // Top bar
+    React.createElement('div', { style:{display:'flex',gap:10,alignItems:'center',marginBottom:24,flexWrap:'wrap'} },
+      React.createElement('select', { value:selectedId, onChange:e=>setSelectedId(e.target.value), style:{...inputSt,width:'auto',marginBottom:0,minWidth:200} },
         events.map(ev=>React.createElement('option', { key:ev.id,value:ev.id,style:{background:'#040c18'} }, ev.title))
       ),
+      React.createElement('input', { placeholder:'Search name or email…',value:search,onChange:e=>setSearch(e.target.value),style:{...inputSt,width:200,marginBottom:0} }),
+      React.createElement(GlowButton, { onClick:()=>{setAddError('');setShowAdd(true);},small:true }, '+ Add Guest'),
+      React.createElement(GlowButton, { onClick:()=>{setScanResult(null);setShowScanner(true);},small:true,variant:'ghost' }, '⬜ Scan QR'),
       React.createElement('a', { href:window.RNTECH_API.exportTickets(selectedId)+'&token='+window.RNTECH_AUTH.getToken(), download:'guest-list.csv', style:{...FS,color:'#3272a8',fontSize:13,fontWeight:700,letterSpacing:'0.06em',textTransform:'uppercase',textDecoration:'none',border:'1px solid rgba(50,114,168,0.4)',padding:'8px 16px'} }, '⬇ Export CSV'),
-      selectedEvent&&React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13} }, tickets.length+' attendees')
+      React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13} }, tickets.length+' attendees')
     ),
-    loading&&React.createElement(Spinner),
-    !loading&&tickets.length===0&&React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)'} },'No registrations yet.'),
-    !loading&&tickets.length>0&&React.createElement('div', { style:{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.08)',overflow:'hidden'} },
+
+    // Table
+    loading && React.createElement(Spinner),
+    !loading && filtered.length===0 && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)'} }, search ? 'No results for "'+search+'".' : 'No registrations yet.'),
+    !loading && filtered.length>0 && React.createElement('div', { style:{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.08)',overflow:'hidden'} },
       React.createElement('table', { style:{width:'100%',borderCollapse:'collapse'} },
         React.createElement('thead', null,
           React.createElement('tr', { style:{borderBottom:'1px solid rgba(255,255,255,0.08)'} },
@@ -409,7 +494,7 @@ function TabGuestList() {
           )
         ),
         React.createElement('tbody', null,
-          tickets.map((t,i)=>React.createElement('tr', { key:t.id, style:{borderBottom:'1px solid rgba(255,255,255,0.04)',background:i%2?'rgba(255,255,255,0.01)':'transparent'} },
+          filtered.map((t,i)=>React.createElement('tr', { key:t.id, style:{borderBottom:'1px solid rgba(255,255,255,0.04)',background:i%2?'rgba(255,255,255,0.01)':'transparent'} },
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.9)'} }, t.holderName),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.5)'} }, t.holderEmail),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.5)'} }, t.ticketTypeName),
@@ -417,10 +502,50 @@ function TabGuestList() {
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:t.status==='valid'?'#10b981':'#64748b'} }, t.status),
             React.createElement('td', { style:{padding:'10px 14px'} },
               t.status==='valid'
-                ? React.createElement('button', { onClick:()=>updateStatus(t.id,'used'), style:{...FS,background:'rgba(100,116,139,0.2)',border:'1px solid rgba(100,116,139,0.3)',color:'#94a3b8',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} },'Mark Used')
-                : React.createElement('button', { onClick:()=>updateStatus(t.id,'valid'), style:{...FS,background:'rgba(16,185,129,0.1)',border:'1px solid rgba(16,185,129,0.3)',color:'#10b981',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} },'Mark Valid')
+                ? React.createElement('button', { onClick:()=>updateStatus(t.id,'used'), style:btnStyle }, 'Mark Used')
+                : React.createElement('button', { onClick:()=>updateStatus(t.id,'valid'), style:btnGreenStyle }, 'Mark Valid')
             )
           ))
+        )
+      )
+    ),
+
+    // Add Guest Modal
+    showAdd && React.createElement('div', { style:{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}, onClick:()=>setShowAdd(false) },
+      React.createElement('div', { onClick:e=>e.stopPropagation(), style:{background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',padding:36,width:'100%',maxWidth:420} },
+        React.createElement('h3', { style:{...FS,fontWeight:800,fontSize:20,color:'#fff',margin:'0 0 20px',textTransform:'uppercase'} }, 'Add Guest'),
+        React.createElement('input', { placeholder:'Full Name',value:guestName,onChange:e=>setGuestName(e.target.value),style:inputSt }),
+        React.createElement('input', { type:'email',placeholder:'Email',value:guestEmail,onChange:e=>setGuestEmail(e.target.value),style:inputSt }),
+        React.createElement('select', { value:guestTypeId,onChange:e=>setGuestTypeId(e.target.value),style:inputSt },
+          React.createElement('option', { value:'' }, 'Select ticket type…'),
+          ticketTypes.map(tt=>React.createElement('option', { key:tt.id,value:tt.id,style:{background:'#040c18'} }, tt.name+(tt.price?' — £'+(tt.price/100).toFixed(2):' — FREE')))
+        ),
+        addError && React.createElement('p', { style:{...FS,color:'#ef4444',fontSize:13,marginBottom:12} }, addError),
+        React.createElement('div', { style:{display:'flex',gap:12,marginTop:8} },
+          React.createElement(GlowButton, { onClick:addGuest,disabled:adding }, adding?'Adding…':'Add to Guest List'),
+          React.createElement(GlowButton, { onClick:()=>setShowAdd(false),variant:'ghost' }, 'Cancel')
+        )
+      )
+    ),
+
+    // QR Scanner
+    showScanner && React.createElement(QRScanModal, { onClose:()=>setShowScanner(false), onScan:handleScan }),
+
+    // Scan Result Modal
+    scanResult && React.createElement('div', { style:{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}, onClick:()=>setScanResult(null) },
+      React.createElement('div', { onClick:e=>e.stopPropagation(), style:{background:'#040c18',border:'1px solid '+(scanResult.error?'rgba(239,68,68,0.4)':scanResult.alreadyUsed?'rgba(100,116,139,0.4)':'rgba(16,185,129,0.4)'),padding:36,width:'100%',maxWidth:380,textAlign:'center'} },
+        React.createElement('div', { style:{fontSize:52,marginBottom:16} }, scanResult.error?'✗':scanResult.alreadyUsed?'⚠':'✓'),
+        React.createElement('h3', { style:{...FS,fontWeight:800,fontSize:22,color:'#fff',margin:'0 0 12px',textTransform:'uppercase'} },
+          scanResult.error ? 'Not Found' : scanResult.alreadyUsed ? 'Already Used' : 'Checked In!'
+        ),
+        !scanResult.error && React.createElement('div', null,
+          React.createElement('p', { style:{...FS,fontSize:18,color:'#fff',margin:'0 0 4px',fontWeight:600} }, scanResult.holderName),
+          React.createElement('p', { style:{...FS,fontSize:13,color:'rgba(255,255,255,0.5)',margin:'0 0 4px'} }, scanResult.ticketTypeName),
+          React.createElement('p', { style:{...FS,fontSize:12,color:'rgba(255,255,255,0.3)',fontFamily:'monospace'} }, scanResult.id)
+        ),
+        scanResult.error && React.createElement('p', { style:{...FS,color:'#ef4444',fontSize:14,marginBottom:16} }, scanResult.error),
+        React.createElement('div', { style:{marginTop:24} },
+          React.createElement(GlowButton, { onClick:()=>setScanResult(null) }, 'Close')
         )
       )
     )
@@ -648,6 +773,80 @@ function TabSponsors() {
   );
 }
 
+// ── Waitlist ──────────────────────────────────────────────────────────────────
+function TabWaitlist() {
+  const [events, setEvents] = useState([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [interests, setInterests] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    window.RNTECH_API.getEvents().then(ev=>{ setEvents(ev); if(ev.length) setSelectedId(ev[0].id); }).catch(()=>{});
+  },[]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    setLoading(true);
+    window.RNTECH_API.adminGetInterest(selectedId).then(d=>{ setInterests(d); setLoading(false); }).catch(()=>setLoading(false));
+  },[selectedId]);
+
+  const reload = () => window.RNTECH_API.adminGetInterest(selectedId).then(setInterests).catch(()=>{});
+
+  const approve = async (id) => {
+    try { await window.RNTECH_API.approveInterest(id); reload(); }
+    catch(err) { alert(err.message); }
+  };
+  const reject = async (id) => {
+    try { await window.RNTECH_API.rejectInterest(id); reload(); }
+    catch(err) { alert(err.message); }
+  };
+
+  const pending = interests.filter(i=>i.status==='pending').length;
+  const approved = interests.filter(i=>i.status==='approved').length;
+  const rejected = interests.filter(i=>i.status==='rejected').length;
+  const statusColor = { pending:'#f59e0b', approved:'#10b981', rejected:'#ef4444' };
+
+  return React.createElement('div', null,
+    React.createElement('div', { style:{display:'flex',gap:10,alignItems:'center',marginBottom:24,flexWrap:'wrap'} },
+      React.createElement('select', { value:selectedId,onChange:e=>setSelectedId(e.target.value),style:{...inputSt,width:'auto',marginBottom:0,minWidth:200} },
+        events.map(ev=>React.createElement('option', { key:ev.id,value:ev.id,style:{background:'#040c18'} }, ev.title))
+      ),
+      React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13} }, pending+' pending · '+approved+' approved · '+rejected+' rejected')
+    ),
+    React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.35)',fontSize:13,marginBottom:20,lineHeight:1.6} },
+      'People register interest here before you open the guest list. Approve to automatically issue them a ticket. Set an event\'s Registration Mode to "Interest Only" to enable this flow.'
+    ),
+    loading && React.createElement(Spinner),
+    !loading && interests.length===0 && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)'} }, 'No interest registrations yet for this event.'),
+    !loading && interests.length>0 && React.createElement('div', { style:{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.08)',overflow:'hidden'} },
+      React.createElement('table', { style:{width:'100%',borderCollapse:'collapse'} },
+        React.createElement('thead', null,
+          React.createElement('tr', { style:{borderBottom:'1px solid rgba(255,255,255,0.08)'} },
+            ['Name','Email','Message','Submitted','Status','Action'].map(h=>
+              React.createElement('th', { key:h, style:{...FS,padding:'12px 14px',textAlign:'left',color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',fontWeight:600} }, h)
+            )
+          )
+        ),
+        React.createElement('tbody', null,
+          interests.map((item,i)=>React.createElement('tr', { key:item.id, style:{borderBottom:'1px solid rgba(255,255,255,0.04)',background:i%2?'rgba(255,255,255,0.01)':'transparent'} },
+            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.9)'} }, item.name),
+            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.5)'} }, item.email),
+            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'rgba(255,255,255,0.4)',maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} }, item.message||'—'),
+            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'rgba(255,255,255,0.3)'} }, item.createdAt.slice(0,10)),
+            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:statusColor[item.status]||'#fff',fontWeight:700,textTransform:'uppercase'} }, item.status),
+            React.createElement('td', { style:{padding:'10px 14px',display:'flex',gap:6,flexWrap:'wrap'} },
+              item.status==='pending' && React.createElement('button', { onClick:()=>approve(item.id), style:{...FS,background:'rgba(16,185,129,0.15)',border:'1px solid rgba(16,185,129,0.3)',color:'#10b981',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} }, 'Approve'),
+              item.status==='pending' && React.createElement('button', { onClick:()=>reject(item.id), style:{...FS,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} }, 'Reject'),
+              item.status==='approved' && React.createElement('span', { style:{...FS,color:'#10b981',fontSize:12} }, '✓ Ticket issued'),
+              item.status==='rejected' && React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.3)',fontSize:12} }, 'Rejected')
+            )
+          ))
+        )
+      )
+    )
+  );
+}
+
 // ── Main Admin Page ───────────────────────────────────────────────────────────
 function PageAdmin({ user }) {
   const [tab, setTab] = useState('overview');
@@ -660,6 +859,7 @@ function PageAdmin({ user }) {
       case 'events':    return React.createElement(TabEvents);
       case 'mixes':     return React.createElement(TabMixes);
       case 'guestlist': return React.createElement(TabGuestList);
+      case 'waitlist':  return React.createElement(TabWaitlist);
       case 'attendees': return React.createElement(TabAttendees);
       case 'messages':  return React.createElement(TabMessages);
       case 'campaigns': return React.createElement(TabCampaigns);

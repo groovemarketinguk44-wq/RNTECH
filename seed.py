@@ -6,10 +6,14 @@ import json
 import secrets
 import sys
 import os
+from pathlib import Path
 
-os.makedirs("data", exist_ok=True)
-os.makedirs("uploads/images", exist_ok=True)
-os.makedirs("uploads/videos", exist_ok=True)
+# Use configured dirs so uploads land on the persistent volume on Fly.io
+data_dir = Path(os.getenv("DATA_DIR", "./data"))
+upload_dir = Path(os.getenv("UPLOAD_DIR", "./uploads"))
+data_dir.mkdir(parents=True, exist_ok=True)
+(upload_dir / "images").mkdir(parents=True, exist_ok=True)
+(upload_dir / "videos").mkdir(parents=True, exist_ok=True)
 
 from backend.database import engine, SessionLocal
 from backend.models import Base, User, Event, TicketType, Mix, Sponsor
@@ -85,16 +89,11 @@ events_data = [
 ]
 
 for ed in events_data:
-    e = db.query(Event).filter(Event.id == ed["id"]).first()
-    if not e:
+    if not db.query(Event).filter(Event.id == ed["id"]).first():
         db.add(Event(**ed))
         print(f"✓ Event: {ed['title']}")
     else:
-        e.date = ed["date"]
-        e.display_date = ed["display_date"]
-        e.status = ed["status"]
-        e.slug = ed["slug"]
-        print(f"  Updated event: {ed['title']}")
+        print(f"  Skipped (exists): {ed['title']}")
 
 db.commit()
 
@@ -147,13 +146,11 @@ sponsors_data = [
 ]
 
 for sd in sponsors_data:
-    s = db.query(Sponsor).filter(Sponsor.id == sd["id"]).first()
-    if not s:
+    if not db.query(Sponsor).filter(Sponsor.id == sd["id"]).first():
         db.add(Sponsor(**sd))
         print(f"✓ Sponsor: {sd['name']}")
     else:
-        s.logo_filename = sd["logo_filename"]
-        print(f"  Updated sponsor logo: {sd['name']}")
+        print(f"  Skipped (exists): {sd['name']}")
 
 db.commit()
 db.close()

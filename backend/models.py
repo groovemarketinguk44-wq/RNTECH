@@ -47,6 +47,8 @@ class Event(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     ticket_types = relationship("TicketType", back_populates="event", cascade="all, delete-orphan")
+    interests = relationship("EventInterest", back_populates="event", cascade="all, delete-orphan")
+    registration_mode = Column(String, default="open")  # open | interest | closed
 
     @property
     def lineup(self):
@@ -88,6 +90,20 @@ class Ticket(Base):
 
     user = relationship("User", back_populates="tickets")
     ticket_type = relationship("TicketType", back_populates="tickets")
+
+
+class EventInterest(Base):
+    __tablename__ = "event_interests"
+
+    id = Column(String, primary_key=True, default=lambda: _uid("int-"))
+    event_id = Column(String, ForeignKey("events.id", ondelete="CASCADE"))
+    name = Column(String, nullable=False)
+    email = Column(String, nullable=False)
+    message = Column(Text, default="")
+    status = Column(String, default="pending")  # pending | approved | rejected
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    event = relationship("Event", back_populates="interests")
 
 
 class Mix(Base):

@@ -51,6 +51,7 @@ window.RNTECH_API = (function () {
     deleteTicketType: (id) => del('/admin/ticket-types/' + id),
 
     // Event interest / waitlist
+    myInterests: () => get('/events/interests/my'),
     submitInterest: (eventId, data) => post('/events/' + eventId + '/interest', data),
     adminGetInterest: (eventId) => get('/admin/interest/' + eventId),
     approveInterest: (id) => put('/admin/interest/' + id + '/approve', {}),

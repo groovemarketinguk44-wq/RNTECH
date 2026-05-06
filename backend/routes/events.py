@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from ..database import get_db
 from ..models import Event, TicketType, EventInterest, Ticket, User, EmailCampaign, EmailSend
-from ..auth import require_admin, hash_password, verify_password, create_token, get_current_user
+from ..auth import require_admin, require_user, hash_password, verify_password, create_token, get_current_user
 
 router = APIRouter()
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
@@ -295,6 +295,30 @@ def submit_interest(event_id: str, data: InterestIn, db: Session = Depends(get_d
             "firstName": user.first_name or "", "lastName": user.last_name or "",
             "email": user.email, "role": user.role, "instagram": user.instagram or "",
         }
+    return result
+
+
+@router.get("/events/interests/my")
+def my_interests(db: Session = Depends(get_db), current_user=Depends(require_user)):
+    interests = db.query(EventInterest).filter(
+        EventInterest.email == current_user.email
+    ).order_by(EventInterest.created_at.desc()).all()
+    result = []
+    for i in interests:
+        event = db.query(Event).filter(Event.id == i.event_id).first()
+        result.append({
+            "id": i.id,
+            "status": i.status,
+            "createdAt": i.created_at.isoformat(),
+            "event": {
+                "id": event.id,
+                "title": event.title,
+                "displayDate": event.display_date,
+                "venue": event.venue,
+                "location": event.location,
+                "posterImage": f"/uploads/{event.poster_image}" if event.poster_image else None,
+            } if event else None,
+        })
     return result
 
 

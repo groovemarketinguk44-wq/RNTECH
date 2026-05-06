@@ -294,13 +294,41 @@ function PageMixes({ user, currentMix, onPlayMix }) {
 }
 
 /* ─── TICKETS ────────────────────────────────────────────────────── */
+function WaitlistCard({ interest }) {
+  const ev = interest.event || {};
+  return React.createElement(FuturisticCard, null,
+    React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:16} },
+      React.createElement('div', null,
+        React.createElement('span', { style:{display:'inline-block',padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',background:'rgba(245,158,11,0.15)',color:'#f59e0b',border:'1px solid rgba(245,158,11,0.35)',fontFamily:"'Space Grotesk',sans-serif",marginBottom:10} }, 'On The List'),
+        React.createElement('h3', { style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:20,color:'#fff',margin:'0 0 4px',textTransform:'uppercase'} }, ev.title||'Event'),
+        React.createElement('div', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'#f59e0b',fontSize:13,fontWeight:600} }, ev.displayDate||''),
+        React.createElement('div', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:12,marginTop:2} }, ev.venue&&ev.location ? ev.venue+', '+ev.location : '')
+      ),
+      React.createElement('div', { style:{width:52,height:52,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.3)',fontSize:22} }, '⏳')
+    ),
+    React.createElement('div', { style:{background:'rgba(245,158,11,0.06)',border:'1px solid rgba(245,158,11,0.15)',padding:'14px 16px'} },
+      React.createElement('p', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.65)',fontSize:13,lineHeight:1.7,margin:0} },
+        "You're registered for this exclusive event. Keep your eyes peeled — if you make the cut, your ticket confirmation will come through. We'll be in touch."
+      )
+    )
+  );
+}
+
 function PageTickets({ user, onAuth }) {
   const [tickets, setTickets] = useState([]);
+  const [interests, setInterests] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) { setLoading(false); return; }
-    window.RNTECH_API.myTickets().then(t=>{ setTickets(t); setLoading(false); }).catch(()=>setLoading(false));
+    Promise.all([
+      window.RNTECH_API.myTickets(),
+      window.RNTECH_API.myInterests(),
+    ]).then(([t, i]) => {
+      setTickets(t);
+      setInterests(i.filter(x => x.status === 'pending'));
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [user]);
 
   if (!user) return React.createElement('div', { style:{ padding:'100px 24px',maxWidth:600,margin:'0 auto',textAlign:'center' } },
@@ -314,14 +342,16 @@ function PageTickets({ user, onAuth }) {
 
   if (loading) return React.createElement('div',{style:{padding:'120px 24px'}},React.createElement(Spinner));
 
+  const total = tickets.length + interests.length;
   return React.createElement('div', { style:{ padding:'100px 24px 100px',maxWidth:700,margin:'0 auto' } },
-    React.createElement(SectionHeader, { title:'My Tickets', subtitle:tickets.length+' ticket'+(tickets.length!==1?'s':'')+' for '+user.name }),
-    tickets.length===0
+    React.createElement(SectionHeader, { title:'My Tickets', subtitle:total+' item'+(total!==1?'s':'')+' for '+user.name }),
+    total===0
       ? React.createElement(FuturisticCard, { style:{ textAlign:'center' } },
           React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:16 } },'No tickets yet. Head to Events to grab your spot.')
         )
       : React.createElement('div', { style:{ display:'flex',flexDirection:'column',gap:20 } },
-          tickets.map(t=>React.createElement(TicketCard, { key:t.id,ticket:t }))
+          interests.map(i => React.createElement(WaitlistCard, { key:i.id, interest:i })),
+          tickets.map(t => React.createElement(TicketCard, { key:t.id, ticket:t }))
         )
   );
 }

@@ -189,3 +189,15 @@ def update_ticket_status(ticket_id: str, data: dict, db: Session = Depends(get_d
     t.status = data.get("status", t.status)
     db.commit()
     return _ticket_dict(t)
+
+
+@router.delete("/admin/tickets/{ticket_id}", status_code=204)
+def delete_ticket(ticket_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    t = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not t:
+        raise HTTPException(404, "Ticket not found")
+    tt = db.query(TicketType).filter(TicketType.id == t.ticket_type_id).first()
+    if tt and tt.sold_count > 0:
+        tt.sold_count -= 1
+    db.delete(t)
+    db.commit()

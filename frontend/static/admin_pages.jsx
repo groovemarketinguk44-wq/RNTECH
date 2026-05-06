@@ -475,6 +475,13 @@ function TabGuestList() {
 
   const btnStyle = { ...FS,background:'rgba(100,116,139,0.2)',border:'1px solid rgba(100,116,139,0.3)',color:'#94a3b8',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em' };
   const btnGreenStyle = { ...FS,background:'rgba(16,185,129,0.1)',border:'1px solid rgba(16,185,129,0.3)',color:'#10b981',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em' };
+  const btnRedStyle = { ...FS,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em' };
+
+  const removeGuest = async (t) => {
+    if (!window.confirm(`Remove ${t.holderName} from the guest list and delete their ticket?`)) return;
+    try { await window.RNTECH_API.deleteTicket(t.id); reload(); }
+    catch(err) { alert(err.message); }
+  };
 
   return React.createElement('div', null,
     // Top bar
@@ -508,10 +515,11 @@ function TabGuestList() {
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.5)'} }, t.ticketTypeName),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'rgba(255,255,255,0.35)',fontFamily:'monospace'} }, t.id),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:t.status==='valid'?'#10b981':'#64748b'} }, t.status),
-            React.createElement('td', { style:{padding:'10px 14px'} },
+            React.createElement('td', { style:{padding:'10px 14px',display:'flex',gap:6,flexWrap:'wrap'} },
               t.status==='valid'
                 ? React.createElement('button', { onClick:()=>updateStatus(t.id,'used'), style:btnStyle }, 'Mark Used')
-                : React.createElement('button', { onClick:()=>updateStatus(t.id,'valid'), style:btnGreenStyle }, 'Mark Valid')
+                : React.createElement('button', { onClick:()=>updateStatus(t.id,'valid'), style:btnGreenStyle }, 'Mark Valid'),
+              React.createElement('button', { onClick:()=>removeGuest(t), style:btnRedStyle }, 'Remove')
             )
           ))
         )

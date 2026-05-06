@@ -65,6 +65,7 @@ window.RNTECH_API = (function () {
     checkinByQR: (qrCode) => post('/admin/tickets/checkin/' + encodeURIComponent(qrCode), {}),
     exportTickets: (eventId) => BASE + '/admin/tickets/export' + (eventId ? '?event_id=' + eventId : '') + '&_auth=' + (token() || ''),
     updateTicketStatus: (id, status) => put('/admin/tickets/' + id + '/status', { status }),
+    deleteTicket: (id) => del('/admin/tickets/' + id),
 
     // Mixes
     getMixes: () => get('/mixes'),

@@ -105,6 +105,8 @@ window.RNTECH_API = (function () {
     getAttendees: () => get('/admin/attendees'),
     exportAttendees: () => BASE + '/admin/attendees/export?_auth=' + (token() || ''),
     unsubscribeUser: (id) => put('/admin/users/' + id + '/unsubscribe', {}),
+    updateUser: (id, data) => put('/admin/users/' + id, data),
+    deleteUser: (id) => del('/admin/users/' + id),
 
     // Campaigns
     getCampaigns: () => get('/admin/campaigns'),

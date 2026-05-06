@@ -572,38 +572,110 @@ function TabGuestList() {
 function TabAttendees() {
   const [attendees, setAttendees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ firstName:'', lastName:'', email:'', instagram:'', role:'user' });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [search, setSearch] = useState('');
 
-  useEffect(() => { window.RNTECH_API.getAttendees().then(a=>{ setAttendees(a); setLoading(false); }).catch(()=>setLoading(false)); },[]);
+  const reload = () => window.RNTECH_API.getAttendees().then(a=>{ setAttendees(a); setLoading(false); }).catch(()=>setLoading(false));
+  useEffect(() => { reload(); }, []);
+
+  const openEdit = (a) => {
+    setEditing(a);
+    setForm({ firstName: a.firstName, lastName: a.lastName, email: a.email, instagram: a.instagram, role: a.role });
+    setSaveError('');
+  };
+
+  const saveEdit = async () => {
+    setSaving(true); setSaveError('');
+    try {
+      await window.RNTECH_API.updateUser(editing.id, form);
+      setEditing(null);
+      reload();
+    } catch(err) {
+      setSaveError(err.message || 'Failed to save');
+    } finally { setSaving(false); }
+  };
+
+  const deleteMember = async (a) => {
+    if (!window.confirm(`Delete ${a.name}'s account? This cannot be undone.`)) return;
+    try { await window.RNTECH_API.deleteUser(a.id); reload(); }
+    catch(err) { alert(err.message); }
+  };
+
+  const unsubscribe = (a) => window.RNTECH_API.unsubscribeUser(a.id)
+    .then(() => setAttendees(prev => prev.map(x => x.id===a.id ? {...x, subscribed:false} : x)));
 
   if (loading) return React.createElement(Spinner);
 
+  const filtered = attendees.filter(a => !search || a.name.toLowerCase().includes(search.toLowerCase()) || a.email.toLowerCase().includes(search.toLowerCase()));
+
   return React.createElement('div', null,
-    React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20} },
-      React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.5)',fontSize:14} }, attendees.length+' members'),
+    React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:10} },
+      React.createElement('div', { style:{display:'flex',gap:10,alignItems:'center'} },
+        React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.5)',fontSize:14} }, attendees.length+' members'),
+        React.createElement('input', { placeholder:'Search name or email…', value:search, onChange:e=>setSearch(e.target.value), style:{...inputSt,width:200,marginBottom:0} })
+      ),
       React.createElement('a', { href:window.RNTECH_API.exportAttendees()+'&token='+window.RNTECH_AUTH.getToken(), download:'attendees.csv', style:{...FS,color:'#3272a8',fontSize:13,fontWeight:700,letterSpacing:'0.06em',textTransform:'uppercase',textDecoration:'none',border:'1px solid rgba(50,114,168,0.4)',padding:'8px 16px'} }, '⬇ Export CSV')
     ),
     attendees.length===0&&React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)'} },'No members yet.'),
-    attendees.length>0&&React.createElement('div', { style:{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.08)',overflow:'hidden'} },
+    filtered.length>0&&React.createElement('div', { style:{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.08)',overflow:'hidden'} },
       React.createElement('table', { style:{width:'100%',borderCollapse:'collapse'} },
         React.createElement('thead', null,
           React.createElement('tr', { style:{borderBottom:'1px solid rgba(255,255,255,0.08)'} },
-            ['Name','Email','Tickets','Joined','Subscribed','Action'].map(h=>
+            ['Name','Email','Instagram','Tickets','Joined','Subscribed','Actions'].map(h=>
               React.createElement('th', { key:h, style:{...FS,padding:'12px 14px',textAlign:'left',color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',fontWeight:600} }, h)
             )
           )
         ),
         React.createElement('tbody', null,
-          attendees.map((a,i)=>React.createElement('tr', { key:a.id, style:{borderBottom:'1px solid rgba(255,255,255,0.04)',background:i%2?'rgba(255,255,255,0.01)':'transparent'} },
+          filtered.map((a,i)=>React.createElement('tr', { key:a.id, style:{borderBottom:'1px solid rgba(255,255,255,0.04)',background:i%2?'rgba(255,255,255,0.01)':'transparent'} },
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.9)'} }, a.name),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.5)'} }, a.email),
+            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12} },
+              a.instagram
+                ? React.createElement('a', { href:'https://www.instagram.com/'+a.instagram, target:'_blank', rel:'noopener noreferrer', style:{color:'#6ba3d4',textDecoration:'none'} }, a.instagram)
+                : React.createElement('span', { style:{color:'rgba(255,255,255,0.2)'} }, '—')
+            ),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.5)',textAlign:'center'} }, a.ticketCount),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'rgba(255,255,255,0.4)'} }, a.joinedAt.slice(0,10)),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:a.subscribed?'#10b981':'#64748b'} }, a.subscribed?'Yes':'No'),
-            React.createElement('td', { style:{padding:'10px 14px'} },
-              a.subscribed&&React.createElement('button', { onClick:()=>window.RNTECH_API.unsubscribeUser(a.id).then(()=>setAttendees(prev=>prev.map(x=>x.id===a.id?{...x,subscribed:false}:x))), style:{...FS,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} },'Unsub')
+            React.createElement('td', { style:{padding:'10px 14px',display:'flex',gap:6,flexWrap:'wrap'} },
+              React.createElement('button', { onClick:()=>openEdit(a), style:{...FS,background:'rgba(50,114,168,0.15)',border:'1px solid rgba(50,114,168,0.35)',color:'#6ba3d4',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} }, 'Edit'),
+              a.subscribed&&React.createElement('button', { onClick:()=>unsubscribe(a), style:{...FS,background:'rgba(100,116,139,0.15)',border:'1px solid rgba(100,116,139,0.3)',color:'#94a3b8',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} }, 'Unsub'),
+              React.createElement('button', { onClick:()=>deleteMember(a), style:{...FS,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} }, 'Delete')
             )
           ))
         )
+      )
+    ),
+
+    // Edit modal
+    editing&&React.createElement(Modal, { title:'Edit Member', onClose:()=>setEditing(null) },
+      React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10} },
+        React.createElement('div', null,
+          React.createElement('label', { style:labelSt }, 'First Name'),
+          React.createElement('input', { value:form.firstName, onChange:e=>setForm(f=>({...f,firstName:e.target.value})), style:inputSt })
+        ),
+        React.createElement('div', null,
+          React.createElement('label', { style:labelSt }, 'Last Name'),
+          React.createElement('input', { value:form.lastName, onChange:e=>setForm(f=>({...f,lastName:e.target.value})), style:inputSt })
+        )
+      ),
+      React.createElement('label', { style:labelSt }, 'Email'),
+      React.createElement('input', { type:'email', value:form.email, onChange:e=>setForm(f=>({...f,email:e.target.value})), style:inputSt }),
+      React.createElement('label', { style:labelSt }, 'Instagram handle (no @)'),
+      React.createElement('input', { value:form.instagram, onChange:e=>setForm(f=>({...f,instagram:e.target.value})), style:inputSt }),
+      React.createElement('label', { style:labelSt }, 'Role'),
+      React.createElement('select', { value:form.role, onChange:e=>setForm(f=>({...f,role:e.target.value})), style:{...inputSt,cursor:'pointer'} },
+        React.createElement('option', { value:'user', style:{background:'#040c18'} }, 'User'),
+        React.createElement('option', { value:'admin', style:{background:'#040c18'} }, 'Admin')
+      ),
+      saveError&&React.createElement('p', { style:{...FS,color:'#ef4444',fontSize:13,marginBottom:12} }, saveError),
+      React.createElement('div', { style:{display:'flex',gap:12,marginTop:8} },
+        React.createElement(GlowButton, { onClick:saveEdit, disabled:saving }, saving?'Saving…':'Save Changes'),
+        React.createElement(GlowButton, { onClick:()=>setEditing(null), variant:'ghost' }, 'Cancel')
       )
     )
   );

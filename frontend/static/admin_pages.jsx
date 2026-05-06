@@ -13,6 +13,14 @@ const ADMIN_TABS = [
   { id: 'sponsors',   label: 'Sponsors' },
 ];
 
+// Pick the nearest upcoming event from a date-DESC list
+function nextUpcomingId(events) {
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = events.filter(e => e.date >= today);
+  if (upcoming.length) return upcoming[upcoming.length - 1].id; // last = closest date
+  return events[0] ? events[0].id : '';
+}
+
 const FS = { fontFamily:"'Space Grotesk',sans-serif" };
 const inputSt = { ...FS,width:'100%',padding:'10px 14px',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'#fff',fontSize:14,outline:'none',boxSizing:'border-box',marginBottom:10 };
 const labelSt = { ...FS,color:'rgba(255,255,255,0.5)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',display:'block',marginBottom:4 };
@@ -422,7 +430,7 @@ function TabGuestList() {
   const [addError, setAddError] = useState('');
 
   useEffect(() => {
-    window.RNTECH_API.getEvents().then(ev=>{ setEvents(ev); if(ev.length) setSelectedId(ev[0].id); }).catch(()=>{});
+    window.RNTECH_API.getEvents().then(ev=>{ setEvents(ev); if(ev.length) setSelectedId(nextUpcomingId(ev)); }).catch(()=>{});
   },[]);
 
   useEffect(() => {
@@ -781,7 +789,7 @@ function TabWaitlist() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    window.RNTECH_API.getEvents().then(ev=>{ setEvents(ev); if(ev.length) setSelectedId(ev[0].id); }).catch(()=>{});
+    window.RNTECH_API.getEvents().then(ev=>{ setEvents(ev); if(ev.length) setSelectedId(nextUpcomingId(ev)); }).catch(()=>{});
   },[]);
 
   useEffect(() => {
@@ -822,7 +830,7 @@ function TabWaitlist() {
       React.createElement('table', { style:{width:'100%',borderCollapse:'collapse'} },
         React.createElement('thead', null,
           React.createElement('tr', { style:{borderBottom:'1px solid rgba(255,255,255,0.08)'} },
-            ['First Name','Last Name','Email','Instagram','Submitted','Status','Action'].map(h=>
+            ['First Name','Last Name','Instagram','Submitted','Status','Action'].map(h=>
               React.createElement('th', { key:h, style:{...FS,padding:'12px 14px',textAlign:'left',color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',fontWeight:600} }, h)
             )
           )
@@ -831,7 +839,6 @@ function TabWaitlist() {
           interests.map((item,i)=>React.createElement('tr', { key:item.id, style:{borderBottom:'1px solid rgba(255,255,255,0.04)',background:i%2?'rgba(255,255,255,0.01)':'transparent'} },
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.9)'} }, item.firstName||item.name),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.9)'} }, item.lastName||''),
-            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.5)'} }, item.email),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'#6ba3d4'} }, item.instagram?'@'+item.instagram:'—'),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'rgba(255,255,255,0.3)'} }, item.createdAt.slice(0,10)),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:statusColor[item.status]||'#fff',fontWeight:700,textTransform:'uppercase'} }, item.status),

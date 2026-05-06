@@ -839,7 +839,10 @@ function TabWaitlist() {
           interests.map((item,i)=>React.createElement('tr', { key:item.id, style:{borderBottom:'1px solid rgba(255,255,255,0.04)',background:i%2?'rgba(255,255,255,0.01)':'transparent'} },
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.9)'} }, item.firstName||item.name),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.9)'} }, item.lastName||''),
-            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'#6ba3d4'} }, item.instagram?'@'+item.instagram:'—'),
+            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12} }, item.instagram
+              ? React.createElement('a', { href:'https://www.instagram.com/'+item.instagram, target:'_blank', rel:'noopener noreferrer', style:{color:'#6ba3d4',textDecoration:'none'} }, item.instagram)
+              : React.createElement('span', { style:{color:'rgba(255,255,255,0.3)'} }, '—')
+            ),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'rgba(255,255,255,0.3)'} }, item.createdAt.slice(0,10)),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:statusColor[item.status]||'#fff',fontWeight:700,textTransform:'uppercase'} }, item.status),
             React.createElement('td', { style:{padding:'10px 14px',display:'flex',gap:6,flexWrap:'wrap'} },

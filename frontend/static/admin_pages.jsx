@@ -816,6 +816,11 @@ function TabWaitlist() {
     try { await window.RNTECH_API.rejectInterest(id); reload(); }
     catch(err) { alert(err.message); }
   };
+  const removeInterest = async (item) => {
+    if (!window.confirm(`Remove ${item.firstName || item.name} from the waitlist entirely?`)) return;
+    try { await window.RNTECH_API.deleteInterest(item.id); reload(); }
+    catch(err) { alert(err.message); }
+  };
 
   const pending = interests.filter(i=>i.status==='pending').length;
   const approved = interests.filter(i=>i.status==='approved').length;
@@ -853,11 +858,12 @@ function TabWaitlist() {
             ),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'rgba(255,255,255,0.3)'} }, item.createdAt.slice(0,10)),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:statusColor[item.status]||'#fff',fontWeight:700,textTransform:'uppercase'} }, item.status),
-            React.createElement('td', { style:{padding:'10px 14px',display:'flex',gap:6,flexWrap:'wrap'} },
+            React.createElement('td', { style:{padding:'10px 14px',display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'} },
               item.status==='pending' && React.createElement('button', { onClick:()=>approve(item.id), style:{...FS,background:'rgba(16,185,129,0.15)',border:'1px solid rgba(16,185,129,0.3)',color:'#10b981',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} }, 'Approve'),
               item.status==='pending' && React.createElement('button', { onClick:()=>reject(item.id), style:{...FS,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} }, 'Reject'),
               item.status==='approved' && React.createElement('span', { style:{...FS,color:'#10b981',fontSize:12} }, '✓ Ticket issued'),
-              item.status==='rejected' && React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.3)',fontSize:12} }, 'Rejected')
+              item.status==='rejected' && React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.3)',fontSize:12} }, 'Rejected'),
+              React.createElement('button', { onClick:()=>removeInterest(item), style:{...FS,background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.25)',color:'#ef4444',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} }, 'Remove')
             )
           ))
         )

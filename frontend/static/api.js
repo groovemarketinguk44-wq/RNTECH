@@ -56,6 +56,7 @@ window.RNTECH_API = (function () {
     adminGetInterest: (eventId) => get('/admin/interest/' + eventId),
     approveInterest: (id) => put('/admin/interest/' + id + '/approve', {}),
     rejectInterest: (id) => put('/admin/interest/' + id + '/reject', {}),
+    deleteInterest: (id) => del('/admin/interest/' + id),
 
     // Tickets
     issueTicket: (data) => post('/tickets', data),

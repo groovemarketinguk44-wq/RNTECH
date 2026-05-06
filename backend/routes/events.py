@@ -369,3 +369,12 @@ def reject_interest(interest_id: str, db: Session = Depends(get_db), _=Depends(r
     i.status = "rejected"
     db.commit()
     return _interest_dict(i)
+
+
+@router.delete("/admin/interest/{interest_id}", status_code=204)
+def delete_interest(interest_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    i = db.query(EventInterest).filter(EventInterest.id == interest_id).first()
+    if not i:
+        raise HTTPException(404, "Not found")
+    db.delete(i)
+    db.commit()

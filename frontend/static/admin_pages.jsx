@@ -822,16 +822,17 @@ function TabWaitlist() {
       React.createElement('table', { style:{width:'100%',borderCollapse:'collapse'} },
         React.createElement('thead', null,
           React.createElement('tr', { style:{borderBottom:'1px solid rgba(255,255,255,0.08)'} },
-            ['Name','Email','Message','Submitted','Status','Action'].map(h=>
+            ['First Name','Last Name','Email','Instagram','Submitted','Status','Action'].map(h=>
               React.createElement('th', { key:h, style:{...FS,padding:'12px 14px',textAlign:'left',color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',fontWeight:600} }, h)
             )
           )
         ),
         React.createElement('tbody', null,
           interests.map((item,i)=>React.createElement('tr', { key:item.id, style:{borderBottom:'1px solid rgba(255,255,255,0.04)',background:i%2?'rgba(255,255,255,0.01)':'transparent'} },
-            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.9)'} }, item.name),
+            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.9)'} }, item.firstName||item.name),
+            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.9)'} }, item.lastName||''),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:13,color:'rgba(255,255,255,0.5)'} }, item.email),
-            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'rgba(255,255,255,0.4)',maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} }, item.message||'—'),
+            React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'#6ba3d4'} }, item.instagram?'@'+item.instagram:'—'),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:'rgba(255,255,255,0.3)'} }, item.createdAt.slice(0,10)),
             React.createElement('td', { style:{...FS,padding:'10px 14px',fontSize:12,color:statusColor[item.status]||'#fff',fontWeight:700,textTransform:'uppercase'} }, item.status),
             React.createElement('td', { style:{padding:'10px 14px',display:'flex',gap:6,flexWrap:'wrap'} },

@@ -16,13 +16,23 @@ class LoginIn(BaseModel):
 
 
 class RegisterIn(BaseModel):
-    name: str
+    firstName: str
+    lastName: str
     email: str
     password: str
+    instagram: str = ""
 
 
 def _user_dict(u: User) -> dict:
-    return {"id": u.id, "name": u.name, "email": u.email, "role": u.role}
+    return {
+        "id": u.id,
+        "name": u.name,
+        "firstName": u.first_name or "",
+        "lastName": u.last_name or "",
+        "email": u.email,
+        "role": u.role,
+        "instagram": u.instagram or "",
+    }
 
 
 @router.post("/auth/login")
@@ -35,16 +45,21 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
 
 @router.post("/auth/register")
 def register(data: RegisterIn, db: Session = Depends(get_db)):
-    if not data.name.strip():
-        raise HTTPException(400, "Name is required")
+    if not data.firstName.strip() or not data.lastName.strip():
+        raise HTTPException(400, "First and last name are required")
     if len(data.password) < 6:
         raise HTTPException(400, "Password must be at least 6 characters")
     if db.query(User).filter(User.email == data.email.lower().strip()).first():
         raise HTTPException(400, "An account with that email already exists")
 
+    first = data.firstName.strip()
+    last = data.lastName.strip()
     user = User(
         id="u-" + secrets.token_hex(8),
-        name=data.name.strip(),
+        name=f"{first} {last}",
+        first_name=first,
+        last_name=last,
+        instagram=data.instagram.strip().lstrip("@") if data.instagram else None,
         email=data.email.lower().strip(),
         password_hash=hash_password(data.password),
         subscribed=True,

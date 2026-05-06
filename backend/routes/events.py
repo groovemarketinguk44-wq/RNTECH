@@ -201,15 +201,21 @@ def delete_ticket_type(tt_id: str, db: Session = Depends(get_db), _=Depends(requ
 
 def _interest_dict(i: EventInterest) -> dict:
     return {
-        "id": i.id, "eventId": i.event_id, "name": i.name, "email": i.email,
-        "message": i.message, "status": i.status, "createdAt": i.created_at.isoformat(),
+        "id": i.id, "eventId": i.event_id,
+        "name": i.name,
+        "firstName": i.first_name or "",
+        "lastName": i.last_name or "",
+        "email": i.email,
+        "instagram": i.instagram or "",
+        "status": i.status, "createdAt": i.created_at.isoformat(),
     }
 
 
 class InterestIn(BaseModel):
-    name: str
+    firstName: str
+    lastName: str
     email: str
-    message: str = ""
+    instagram: str = ""
 
 
 @router.post("/events/{event_id}/interest")
@@ -218,15 +224,20 @@ def submit_interest(event_id: str, data: InterestIn, db: Session = Depends(get_d
     if not e:
         raise HTTPException(404, "Event not found")
     existing = db.query(EventInterest).filter(
-        EventInterest.event_id == event_id, EventInterest.email == data.email
+        EventInterest.event_id == event_id, EventInterest.email == data.email.lower().strip()
     ).first()
     if existing:
         raise HTTPException(400, "You've already registered interest for this event")
+    first = data.firstName.strip()
+    last = data.lastName.strip()
     interest = EventInterest(
         event_id=event_id,
-        name=data.name,
-        email=data.email,
-        message=data.message,
+        name=f"{first} {last}",
+        first_name=first,
+        last_name=last,
+        email=data.email.lower().strip(),
+        instagram=data.instagram.strip().lstrip("@") if data.instagram else None,
+        message="",
     )
     db.add(interest)
     db.commit()

@@ -262,7 +262,9 @@ function TicketCard({ ticket }) {
 /* ─── Auth Modal ─────────────────────────────────────────────────── */
 function AuthModal({ mode, onClose, onSuccess }) {
   const [tab, setTab] = useState(mode||'login');
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [instagram, setInstagram] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -277,8 +279,9 @@ function AuthModal({ mode, onClose, onSuccess }) {
       if (tab === 'login') {
         res = await window.RNTECH_API.login(email, password);
       } else {
-        if (!name.trim()) { setError('Please enter your name.'); setLoading(false); return; }
-        res = await window.RNTECH_API.register(name, email, password);
+        if (!firstName.trim()) { setError('Please enter your first name.'); setLoading(false); return; }
+        if (!lastName.trim()) { setError('Please enter your last name.'); setLoading(false); return; }
+        res = await window.RNTECH_API.register(firstName, lastName, email, password, instagram);
       }
       window.RNTECH_AUTH.setToken(res.token);
       window.RNTECH_AUTH.setUser(res.user);
@@ -293,13 +296,17 @@ function AuthModal({ mode, onClose, onSuccess }) {
   const inputStyle = { width:'100%',padding:'12px 16px',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'#fff',fontSize:15,fontFamily:"'Space Grotesk',sans-serif",outline:'none',boxSizing:'border-box' };
 
   return React.createElement('div',{style:{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,0.8)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20},onClick:onClose},
-    React.createElement('div',{onClick:e=>e.stopPropagation(),style:{background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:40,width:'100%',maxWidth:420,boxShadow:'0 0 60px rgba(50,114,168,0.2)'}},
+    React.createElement('div',{onClick:e=>e.stopPropagation(),style:{background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:40,width:'100%',maxWidth:440,boxShadow:'0 0 60px rgba(50,114,168,0.2)'}},
       React.createElement('h2',{style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:28,color:'#fff',margin:'0 0 8px',textTransform:'uppercase',letterSpacing:'-0.02em'}},tab==='login'?'Sign In':'Create Account'),
       React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:14,marginBottom:28}},tab==='login'?'Welcome back to RNTECH.':'Join RNTECH. Get tickets and mixes all in one place.'),
       React.createElement('form',{onSubmit:submit,style:{display:'flex',flexDirection:'column',gap:14}},
-        tab==='register'&&React.createElement('input',{placeholder:'Your Name',value:name,onChange:e=>setName(e.target.value),required:true,style:inputStyle}),
+        tab==='register'&&React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+          React.createElement('input',{placeholder:'First Name',value:firstName,onChange:e=>setFirstName(e.target.value),required:true,style:inputStyle}),
+          React.createElement('input',{placeholder:'Last Name',value:lastName,onChange:e=>setLastName(e.target.value),required:true,style:inputStyle})
+        ),
         React.createElement('input',{type:'email',placeholder:'Email Address',value:email,onChange:e=>setEmail(e.target.value),required:true,style:inputStyle}),
         React.createElement('input',{type:'password',placeholder:'Password',value:password,onChange:e=>setPassword(e.target.value),required:true,minLength:6,style:inputStyle}),
+        tab==='register'&&React.createElement('input',{placeholder:'Instagram handle (optional)',value:instagram,onChange:e=>setInstagram(e.target.value),style:{...inputStyle,opacity:0.75}}),
         error&&React.createElement('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:4,padding:'10px 14px',fontFamily:"'Space Grotesk',sans-serif",color:'#ef4444',fontSize:13}},error),
         React.createElement('button',{type:'submit',disabled:loading,style:{padding:14,borderRadius:0,border:'none',cursor:loading?'wait':'pointer',background:'linear-gradient(135deg,#3272a8 0%,#06b6d4 100%)',color:'#fff',fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:14,letterSpacing:'0.08em',textTransform:'uppercase',boxShadow:'0 0 20px rgba(50,114,168,0.4)',opacity:loading?0.7:1}},loading?'Please wait…':tab==='login'?'Sign In':'Create Account'),
         React.createElement('button',{type:'button',onClick:()=>{setTab(tab==='login'?'register':'login');setError('');},style:{background:'none',border:'none',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:13}},tab==='login'?'No account? Create one →':'← Already have an account? Sign in')

@@ -30,7 +30,7 @@ window.RNTECH_API = (function () {
   return {
     // Auth
     login: (email, password) => post('/auth/login', { email, password }),
-    register: (name, email, password) => post('/auth/register', { name, email, password }),
+    register: (firstName, lastName, email, password, instagram) => post('/auth/register', { firstName, lastName, email, password, instagram }),
     me: () => get('/auth/me'),
     changePassword: (current, newPass) => put('/auth/password', { current, new: newPass }),
 

@@ -85,9 +85,10 @@ function PageEvents({ user, onAuth, onPlayMix }) {
   const [buyError, setBuyError] = useState('');
   // Interest / waitlist state
   const [interestEvent, setInterestEvent] = useState(null);
-  const [interestName, setInterestName] = useState('');
+  const [interestFirst, setInterestFirst] = useState('');
+  const [interestLast, setInterestLast] = useState('');
   const [interestEmail, setInterestEmail] = useState('');
-  const [interestMsg, setInterestMsg] = useState('');
+  const [interestInstagram, setInterestInstagram] = useState('');
   const [interestBusy, setInterestBusy] = useState(false);
   const [interestError, setInterestError] = useState('');
   const [interestDone, setInterestDone] = useState(false);
@@ -100,9 +101,10 @@ function PageEvents({ user, onAuth, onPlayMix }) {
     if (event.registrationMode === 'closed') { alert('Registration for this event is now closed.'); return; }
     if (event.registrationMode === 'interest') {
       setInterestEvent(event);
-      setInterestName(user ? user.name : '');
+      setInterestFirst(user ? (user.firstName || '') : '');
+      setInterestLast(user ? (user.lastName || '') : '');
       setInterestEmail(user ? user.email : '');
-      setInterestMsg(''); setInterestError(''); setInterestDone(false);
+      setInterestInstagram(''); setInterestError(''); setInterestDone(false);
       return;
     }
     if (!user) { alert('Please sign in to get tickets.'); return; }
@@ -115,10 +117,11 @@ function PageEvents({ user, onAuth, onPlayMix }) {
   };
 
   const doInterest = async () => {
-    if (!interestName.trim() || !interestEmail.trim()) { setInterestError('Please fill in your name and email.'); return; }
+    if (!interestFirst.trim() || !interestLast.trim()) { setInterestError('Please enter your first and last name.'); return; }
+    if (!interestEmail.trim()) { setInterestError('Please enter your email.'); return; }
     setInterestBusy(true); setInterestError('');
     try {
-      await window.RNTECH_API.submitInterest(interestEvent.id, { name: interestName.trim(), email: interestEmail.trim(), message: interestMsg.trim() });
+      await window.RNTECH_API.submitInterest(interestEvent.id, { firstName: interestFirst.trim(), lastName: interestLast.trim(), email: interestEmail.trim(), instagram: interestInstagram.trim() });
       setInterestDone(true);
     } catch(err) {
       setInterestError(err.message || 'Something went wrong');
@@ -205,9 +208,12 @@ function PageEvents({ user, onAuth, onPlayMix }) {
           : React.createElement('div', null,
               React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:22,color:'#fff',margin:'0 0 6px',textTransform:'uppercase' } }, 'Register Interest'),
               React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:13,marginBottom:20 } }, interestEvent.title+' · '+interestEvent.displayDate),
-              React.createElement('input', { placeholder:'Your Name',value:interestName,onChange:e=>setInterestName(e.target.value),style:inputStyle }),
-              React.createElement('input', { type:'email',placeholder:'Your Email',value:interestEmail,onChange:e=>setInterestEmail(e.target.value),style:inputStyle }),
-              React.createElement('textarea', { placeholder:'Anything you want to add? (optional)',value:interestMsg,onChange:e=>setInterestMsg(e.target.value),rows:3,style:{...inputStyle,resize:'vertical',marginBottom:16} }),
+              React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12 } },
+                React.createElement('input', { placeholder:'First Name',value:interestFirst,onChange:e=>setInterestFirst(e.target.value),style:{...inputStyle,marginBottom:0} }),
+                React.createElement('input', { placeholder:'Last Name',value:interestLast,onChange:e=>setInterestLast(e.target.value),style:{...inputStyle,marginBottom:0} })
+              ),
+              React.createElement('input', { type:'email',placeholder:'Email Address',value:interestEmail,onChange:e=>setInterestEmail(e.target.value),style:inputStyle }),
+              React.createElement('input', { placeholder:'Instagram handle (optional)',value:interestInstagram,onChange:e=>setInterestInstagram(e.target.value),style:{...inputStyle,opacity:0.75,marginBottom:16} }),
               interestError&&React.createElement('div', { style:{ color:'#ef4444',fontSize:13,marginBottom:12,fontFamily:"'Space Grotesk',sans-serif" } }, interestError),
               React.createElement(GlowButton, { onClick:doInterest,style:{ width:'100%' },disabled:interestBusy }, interestBusy?'Sending…':'Register Interest')
             )

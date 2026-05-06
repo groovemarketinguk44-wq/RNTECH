@@ -24,14 +24,24 @@ Base.metadata.create_all(bind=engine)
 
 # Migrate existing DBs: add columns that didn't exist at initial deploy
 with engine.connect() as _conn:
-    try:
-        _cols = [c["name"] for c in sa_inspect(engine).get_columns("events")]
-        if "registration_mode" not in _cols:
-            _conn.execute(text("ALTER TABLE events ADD COLUMN registration_mode TEXT DEFAULT 'open'"))
-            _conn.commit()
-            print("✓ Migrated: added registration_mode to events")
-    except Exception as _e:
-        print(f"  Migration skipped: {_e}")
+    _insp = sa_inspect(engine)
+    def _add_col(table, col, typedef):
+        try:
+            cols = [c["name"] for c in _insp.get_columns(table)]
+            if col not in cols:
+                _conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}"))
+                _conn.commit()
+                print(f"✓ Migrated: {table}.{col}")
+        except Exception as _e:
+            print(f"  Migration skipped {table}.{col}: {_e}")
+
+    _add_col("events",          "registration_mode", "TEXT DEFAULT 'open'")
+    _add_col("users",           "first_name",        "TEXT")
+    _add_col("users",           "last_name",         "TEXT")
+    _add_col("users",           "instagram",         "TEXT")
+    _add_col("event_interests", "first_name",        "TEXT")
+    _add_col("event_interests", "last_name",         "TEXT")
+    _add_col("event_interests", "instagram",         "TEXT")
 
 db = SessionLocal()
 

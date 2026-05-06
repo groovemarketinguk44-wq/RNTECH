@@ -15,6 +15,9 @@ class User(Base):
 
     id = Column(String, primary_key=True, default=lambda: _uid("u-"))
     name = Column(String, nullable=False)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    instagram = Column(String, nullable=True)
     email = Column(String, unique=True, nullable=False, index=True)
     password_hash = Column(String, nullable=False)
     role = Column(String, default="user")  # "user" | "admin"
@@ -98,7 +101,10 @@ class EventInterest(Base):
     id = Column(String, primary_key=True, default=lambda: _uid("int-"))
     event_id = Column(String, ForeignKey("events.id", ondelete="CASCADE"))
     name = Column(String, nullable=False)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
     email = Column(String, nullable=False)
+    instagram = Column(String, nullable=True)
     message = Column(Text, default="")
     status = Column(String, default="pending")  # pending | approved | rejected
     created_at = Column(DateTime, default=datetime.utcnow)

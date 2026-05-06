@@ -40,13 +40,21 @@ async def lifespan(app: FastAPI):
     # Migrate existing DBs: add columns added after initial deploy
     with engine.connect() as conn:
         inspector = sa_inspect(engine)
-        try:
-            event_cols = [c["name"] for c in inspector.get_columns("events")]
-            if "registration_mode" not in event_cols:
-                conn.execute(text("ALTER TABLE events ADD COLUMN registration_mode TEXT DEFAULT 'open'"))
-                conn.commit()
-        except Exception:
-            pass
+        def _migrate(table, col, typedef):
+            try:
+                cols = [c["name"] for c in inspector.get_columns(table)]
+                if col not in cols:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}"))
+                    conn.commit()
+            except Exception:
+                pass
+        _migrate("events",          "registration_mode", "TEXT DEFAULT 'open'")
+        _migrate("users",           "first_name",        "TEXT")
+        _migrate("users",           "last_name",         "TEXT")
+        _migrate("users",           "instagram",         "TEXT")
+        _migrate("event_interests", "first_name",        "TEXT")
+        _migrate("event_interests", "last_name",         "TEXT")
+        _migrate("event_interests", "instagram",         "TEXT")
     # Ensure upload dirs exist
     for sub in ("images", "videos"):
         (UPLOAD_DIR / sub).mkdir(parents=True, exist_ok=True)

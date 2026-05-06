@@ -1,5 +1,6 @@
 import json
 import secrets
+from datetime import datetime, timedelta
 from pathlib import Path
 import os
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -7,8 +8,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 from ..database import get_db
-from ..models import Event, TicketType, EventInterest, Ticket
-from ..auth import require_admin
+from ..models import Event, TicketType, EventInterest, Ticket, User, EmailCampaign, EmailSend
+from ..auth import require_admin, hash_password, verify_password, create_token, get_current_user
 
 router = APIRouter()
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
@@ -216,32 +217,85 @@ class InterestIn(BaseModel):
     lastName: str
     email: str
     instagram: str = ""
+    password: str = ""
 
 
 @router.post("/events/{event_id}/interest")
-def submit_interest(event_id: str, data: InterestIn, db: Session = Depends(get_db)):
+def submit_interest(event_id: str, data: InterestIn, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     e = db.query(Event).filter(Event.id == event_id).first()
     if not e:
         raise HTTPException(404, "Event not found")
+
+    email = data.email.lower().strip()
+    first = data.firstName.strip()
+    last = data.lastName.strip()
+    instagram_val = data.instagram.strip().lstrip("@") if data.instagram else None
+
     existing = db.query(EventInterest).filter(
-        EventInterest.event_id == event_id, EventInterest.email == data.email.lower().strip()
+        EventInterest.event_id == event_id, EventInterest.email == email
     ).first()
     if existing:
         raise HTTPException(400, "You've already registered interest for this event")
-    first = data.firstName.strip()
-    last = data.lastName.strip()
+
+    token = None
+    user = current_user
+
+    if not user:
+        existing_user = db.query(User).filter(User.email == email).first()
+        if existing_user:
+            if not data.password:
+                raise HTTPException(400, "An account with this email already exists. Enter your password to continue.")
+            if not verify_password(data.password, existing_user.password_hash):
+                raise HTTPException(400, "Incorrect password.")
+            user = existing_user
+            token = create_token(user.id)
+        else:
+            if not data.password:
+                raise HTTPException(400, "Please set a password to create your account.")
+            if len(data.password) < 6:
+                raise HTTPException(400, "Password must be at least 6 characters.")
+            user = User(
+                id="u-" + secrets.token_hex(8),
+                name=f"{first} {last}",
+                first_name=first,
+                last_name=last,
+                instagram=instagram_val,
+                email=email,
+                password_hash=hash_password(data.password),
+                subscribed=True,
+            )
+            db.add(user)
+            db.flush()
+            for campaign in db.query(EmailCampaign).filter(EmailCampaign.active == True).all():
+                db.add(EmailSend(
+                    id="snd-" + secrets.token_hex(8),
+                    campaign_id=campaign.id,
+                    user_id=user.id,
+                    scheduled_for=datetime.utcnow() + timedelta(days=campaign.delay_days),
+                ))
+            token = create_token(user.id)
+
     interest = EventInterest(
         event_id=event_id,
         name=f"{first} {last}",
         first_name=first,
         last_name=last,
-        email=data.email.lower().strip(),
-        instagram=data.instagram.strip().lstrip("@") if data.instagram else None,
+        email=email,
+        instagram=instagram_val,
         message="",
     )
     db.add(interest)
     db.commit()
-    return {"ok": True}
+
+    result = {"ok": True}
+    if token and user:
+        result["token"] = token
+        result["user"] = {
+            "id": user.id, "name": user.name,
+            "firstName": user.first_name or "", "lastName": user.last_name or "",
+            "email": user.email, "role": user.role, "instagram": user.instagram or "",
+        }
+    return result
 
 
 @router.get("/admin/interest/{event_id}")

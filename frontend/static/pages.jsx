@@ -72,7 +72,7 @@ function PageHome({ user, onAuth, onNavigate, onPlayMix, currentMix }) {
 }
 
 /* ─── EVENTS ─────────────────────────────────────────────────────── */
-function PageEvents({ user, onAuth, onPlayMix }) {
+function PageEvents({ user, onAuth, onLogin, onPlayMix }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
@@ -89,6 +89,7 @@ function PageEvents({ user, onAuth, onPlayMix }) {
   const [interestLast, setInterestLast] = useState('');
   const [interestEmail, setInterestEmail] = useState('');
   const [interestInstagram, setInterestInstagram] = useState('');
+  const [interestPassword, setInterestPassword] = useState('');
   const [interestBusy, setInterestBusy] = useState(false);
   const [interestError, setInterestError] = useState('');
   const [interestDone, setInterestDone] = useState(false);
@@ -104,7 +105,7 @@ function PageEvents({ user, onAuth, onPlayMix }) {
       setInterestFirst(user ? (user.firstName || '') : '');
       setInterestLast(user ? (user.lastName || '') : '');
       setInterestEmail(user ? user.email : '');
-      setInterestInstagram(''); setInterestError(''); setInterestDone(false);
+      setInterestInstagram(''); setInterestPassword(''); setInterestError(''); setInterestDone(false);
       return;
     }
     if (!user) { alert('Please sign in to get tickets.'); return; }
@@ -119,9 +120,19 @@ function PageEvents({ user, onAuth, onPlayMix }) {
   const doInterest = async () => {
     if (!interestFirst.trim() || !interestLast.trim()) { setInterestError('Please enter your first and last name.'); return; }
     if (!interestEmail.trim()) { setInterestError('Please enter your email.'); return; }
+    if (!user && !interestPassword.trim()) { setInterestError('Please set a password for your account.'); return; }
     setInterestBusy(true); setInterestError('');
     try {
-      await window.RNTECH_API.submitInterest(interestEvent.id, { firstName: interestFirst.trim(), lastName: interestLast.trim(), email: interestEmail.trim(), instagram: interestInstagram.trim() });
+      const res = await window.RNTECH_API.submitInterest(interestEvent.id, {
+        firstName: interestFirst.trim(), lastName: interestLast.trim(),
+        email: interestEmail.trim(), instagram: interestInstagram.trim(),
+        password: interestPassword,
+      });
+      if (res.token && res.user) {
+        window.RNTECH_AUTH.setToken(res.token);
+        window.RNTECH_AUTH.setUser(res.user);
+        if (onLogin) onLogin(res.user);
+      }
       setInterestDone(true);
     } catch(err) {
       setInterestError(err.message || 'Something went wrong');
@@ -202,7 +213,7 @@ function PageEvents({ user, onAuth, onPlayMix }) {
           ? React.createElement('div', { style:{ textAlign:'center' } },
               React.createElement('div', { style:{ fontSize:40,marginBottom:16 } }, '✓'),
               React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:22,color:'#10b981',margin:'0 0 12px',textTransform:'uppercase' } }, "You're on the list!"),
-              React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:14,marginBottom:24 } }, "We'll be in touch when guest list spots open up."),
+              React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:14,marginBottom:24 } }, "We'll be in touch when spots open up. You're now signed in to your RNTECH account."),
               React.createElement(GlowButton, { onClick:()=>setInterestEvent(null),style:{ width:'100%' } }, 'Close')
             )
           : React.createElement('div', null,
@@ -213,7 +224,9 @@ function PageEvents({ user, onAuth, onPlayMix }) {
                 React.createElement('input', { placeholder:'Last Name',value:interestLast,onChange:e=>setInterestLast(e.target.value),style:{...inputStyle,marginBottom:0} })
               ),
               React.createElement('input', { type:'email',placeholder:'Email Address',value:interestEmail,onChange:e=>setInterestEmail(e.target.value),style:inputStyle }),
-              React.createElement('input', { placeholder:'Instagram handle (optional)',value:interestInstagram,onChange:e=>setInterestInstagram(e.target.value),style:{...inputStyle,opacity:0.75,marginBottom:16} }),
+              React.createElement('input', { placeholder:'Instagram handle (optional)',value:interestInstagram,onChange:e=>setInterestInstagram(e.target.value),style:{...inputStyle,opacity:0.75} }),
+              !user&&React.createElement('input', { type:'password',placeholder:'Set a password for your RNTECH account',value:interestPassword,onChange:e=>setInterestPassword(e.target.value),minLength:6,style:{...inputStyle,marginBottom:16} }),
+              !user&&React.createElement('p', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.3)',fontSize:11,marginTop:-10,marginBottom:12,lineHeight:1.5} }, 'Registering creates your RNTECH account. Already have one? Enter your password above.'),
               interestError&&React.createElement('div', { style:{ color:'#ef4444',fontSize:13,marginBottom:12,fontFamily:"'Space Grotesk',sans-serif" } }, interestError),
               React.createElement(GlowButton, { onClick:doInterest,style:{ width:'100%' },disabled:interestBusy }, interestBusy?'Sending…':'Register Interest')
             )

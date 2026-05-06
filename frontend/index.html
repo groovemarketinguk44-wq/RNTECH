@@ -218,7 +218,7 @@ function App() {
   const activePage = showAdmin ? 'admin' : page;
 
   const renderPage = () => {
-    const props = { user, onAuth, onNavigate, onPlayMix: handlePlayMix, currentMix };
+    const props = { user, onAuth, onLogin: onAuthSuccess, onNavigate, onPlayMix: handlePlayMix, currentMix };
     switch (activePage) {
       case 'home':    return React.createElement(PageHome, props);
       case 'events':  return React.createElement(PageEvents, props);

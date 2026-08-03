@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..database import get_db
 from ..models import Event, TicketType, EventInterest, Ticket, TicketOrder, User
-from ..auth import get_current_user, get_or_create_guest_user, create_password_setup_link
+from ..auth import get_current_user, get_or_create_guest_user, ensure_guest_email_available, create_password_setup_link
 from ..email_service import send_email
 from ..ticket_pdf import generate_tickets_pdf
 from .. import meta_capi
@@ -86,6 +86,7 @@ def create_checkout_session(data: CheckoutIn, request: Request, db: Session = De
     guest_created = False
     order_user_id = current_user.id if current_user else None
     if not current_user:
+        ensure_guest_email_available(db, holder_email)
         guest_user, guest_created = get_or_create_guest_user(db, holder_name, holder_email)
         order_user_id = guest_user.id
 

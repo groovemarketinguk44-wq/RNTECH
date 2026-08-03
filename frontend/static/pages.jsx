@@ -88,7 +88,6 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
   const [buying, setBuying] = useState(false);
   const [buyError, setBuyError] = useState('');
   const [pendingAuthEventId, setPendingAuthEventId] = useState(null);
-  const [authChoiceEvent, setAuthChoiceEvent] = useState(null);
   // Interest / waitlist state
   const [interestEvent, setInterestEvent] = useState(null);
   const [interestFirst, setInterestFirst] = useState('');
@@ -127,10 +126,6 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
     }
     openTicketModal(event);
   };
-
-  const chooseSignIn = () => { setPendingAuthEventId(authChoiceEvent.id); setAuthChoiceEvent(null); onAuth('login'); };
-  const chooseCreateAccount = () => { setPendingAuthEventId(authChoiceEvent.id); setAuthChoiceEvent(null); onAuth('register'); };
-  const chooseGuest = () => { setAuthChoiceEvent(null); doPurchase(); };
 
   // Home page "Get Tickets" / "View Lineup" hand off a specific event to act on here
   useEffect(() => {
@@ -195,16 +190,22 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
         return;
       }
     } catch(err) {
-      setBuyError(err.message||'Failed to process ticket');
+      if (err.status === 409) {
+        // Email already belongs to a registered account — don't silently attach
+        // the ticket to it, send them to sign in and resume once they're back
+        setBuyError('That email already has an RNTECH account — sign in to continue your purchase.');
+        setPendingAuthEventId(ticketEvent.id);
+        onAuth('login', holderEmail);
+      } else {
+        setBuyError(err.message||'Failed to process ticket');
+      }
     } finally {
       setBuying(false);
     }
   };
 
-  // Clicking "Buy" is the moment we need to know who the buyer is
   const doTicket = () => {
     if (!selectedType) return;
-    if (!user) { setAuthChoiceEvent(ticketEvent); return; }
     doPurchase();
   };
 
@@ -262,7 +263,7 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
       )
     ),
     // Ticket modal
-    ticketEvent&&!authChoiceEvent&&React.createElement('div', { className:'modal-overlay', style:{ position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20 }, onClick:()=>setTicketEvent(null) },
+    ticketEvent&&React.createElement('div', { className:'modal-overlay', style:{ position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20 }, onClick:()=>setTicketEvent(null) },
       React.createElement('div', { className:'modal-sheet', onClick:e=>e.stopPropagation(), style:{ background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:36,width:'100%',maxWidth:440,boxShadow:'0 0 60px rgba(50,114,168,0.2)' } },
         React.createElement('div',{className:'modal-handle'}),
         React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:22,color:'#fff',margin:'0 0 6px',textTransform:'uppercase' } },'Get Tickets'),
@@ -298,20 +299,6 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
           buying?'Processing…':selectedType&&selectedType.price===0
             ?(quantity>1?`Confirm ${quantity} Free Tickets`:'Confirm Free Ticket')
             :(quantity>1&&selectedType?`Pay £${(selectedType.price*quantity/100).toFixed(2)} — ${quantity} Tickets`:'Confirm Purchase'))
-      )
-    ),
-    // Sign in / create account / guest checkout chooser
-    authChoiceEvent&&React.createElement('div', { className:'modal-overlay', style:{ position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20 }, onClick:()=>setAuthChoiceEvent(null) },
-      React.createElement('div', { className:'modal-sheet', onClick:e=>e.stopPropagation(), style:{ background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:36,width:'100%',maxWidth:440,boxShadow:'0 0 60px rgba(50,114,168,0.2)' } },
-        React.createElement('div',{className:'modal-handle'}),
-        React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:22,color:'#fff',margin:'0 0 6px',textTransform:'uppercase' } }, authChoiceEvent.isFree?'Get Your Ticket':'Buy Your Ticket'),
-        React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:13,marginBottom:24 } }, authChoiceEvent.title+' · '+authChoiceEvent.displayDate),
-        React.createElement('div', { style:{ display:'flex',flexDirection:'column',gap:12 } },
-          React.createElement(GlowButton, { onClick:chooseGuest, style:{ width:'100%' } },'Continue as Guest'),
-          React.createElement(GlowButton, { onClick:chooseSignIn, variant:'ghost', style:{ width:'100%' } },'Sign In'),
-          React.createElement(GlowButton, { onClick:chooseCreateAccount, variant:'ghost', style:{ width:'100%' } },'Create Account')
-        ),
-        React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.3)',fontSize:11,marginTop:20,lineHeight:1.5 } },'Guest checkout books your ticket instantly and sets up a free RNTECH account with your details, so you can always find it under My Tickets.')
       )
     )
   );

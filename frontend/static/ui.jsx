@@ -268,12 +268,12 @@ function TicketCard({ ticket }) {
 }
 
 /* ─── Auth Modal ─────────────────────────────────────────────────── */
-function AuthModal({ mode, onClose, onSuccess }) {
+function AuthModal({ mode, initialEmail, onClose, onSuccess }) {
   const [tab, setTab] = useState(mode||'login');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [instagram, setInstagram] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(initialEmail||'');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);

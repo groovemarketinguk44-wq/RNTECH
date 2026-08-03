@@ -58,6 +58,16 @@ def require_admin(user: User | None = Depends(get_current_user)) -> User:
     return user
 
 
+def ensure_guest_email_available(db: Session, email: str) -> None:
+    """Blocks guest checkout from silently attaching to someone else's existing account.
+
+    Raises 409 so the frontend can redirect to sign-in instead of issuing the ticket.
+    """
+    existing = db.query(User).filter(User.email == email.strip().lower()).first()
+    if existing:
+        raise HTTPException(409, "An account with this email already exists. Please sign in to continue.")
+
+
 def get_or_create_guest_user(db: Session, name: str, email: str) -> tuple[User, bool]:
     """Looks up a user by email for a guest checkout, creating an account if none exists.
 

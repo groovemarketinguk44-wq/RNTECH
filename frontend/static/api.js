@@ -24,7 +24,9 @@ window.RNTECH_API = (function () {
       let message = 'Request failed';
       if (typeof data.detail === 'string') message = data.detail;
       else if (Array.isArray(data.detail)) message = data.detail.map(e => e.msg || JSON.stringify(e)).join('; ');
-      throw new Error(message);
+      const err = new Error(message);
+      err.status = res.status;
+      throw err;
     }
     return data;
   }

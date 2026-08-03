@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..database import get_db
 from ..models import Ticket, TicketType, Event, User
-from ..auth import require_user, require_admin, get_current_user, get_or_create_guest_user
+from ..auth import require_user, require_admin, get_current_user, get_or_create_guest_user, ensure_guest_email_available
 from .. import meta_capi
 from .checkout import _send_ticket_confirmation
 
@@ -55,6 +55,7 @@ def issue_ticket(data: TicketIn, request: Request, db: Session = Depends(get_db)
 
     guest_created = False
     if not user:
+        ensure_guest_email_available(db, holder_email)
         user, guest_created = get_or_create_guest_user(db, holder_name, holder_email)
 
     tt = db.query(TicketType).filter(TicketType.id == data.ticketTypeId, TicketType.active == True).first()

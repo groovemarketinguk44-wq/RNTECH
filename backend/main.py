@@ -11,8 +11,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text, inspect as sa_inspect
 from .database import engine, SessionLocal
 from .models import Base
-from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns
+from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout
 from .routes.campaigns import process_pending_sends
+from .routes.inbox_routes import sweep_side_folders_to_inbox
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,6 +32,15 @@ def _run_pending():
             logger.info(f"Email scheduler: processed {n} pending sends")
     finally:
         db.close()
+
+
+def _run_mail_sweep():
+    try:
+        n = sweep_side_folders_to_inbox()
+        if n:
+            logger.info(f"Mail sweep: moved {n} messages into INBOX")
+    except Exception:
+        logger.exception("Mail sweep failed")
 
 
 @asynccontextmanager
@@ -55,11 +65,24 @@ async def lifespan(app: FastAPI):
         _migrate("event_interests", "first_name",        "TEXT")
         _migrate("event_interests", "last_name",         "TEXT")
         _migrate("event_interests", "instagram",         "TEXT")
+        _migrate("ticket_types",    "is_tiered",         "INTEGER DEFAULT 0")
+        _migrate("ticket_types",    "tiers_json",        "TEXT DEFAULT '[]'")
+        _migrate("event_interests", "invite_token",           "TEXT")
+        _migrate("event_interests", "invite_ticket_type_id",  "TEXT")
+        _migrate("event_interests", "invite_discount_percent", "INTEGER DEFAULT 0")
+        _migrate("event_interests", "invited_at",             "TIMESTAMP")
+        _migrate("tickets",         "order_id",           "TEXT")
+        _migrate("tickets",         "amount_paid_pence",  "INTEGER DEFAULT 0")
+        _migrate("ticket_orders",   "quantity",           "INTEGER DEFAULT 1")
+        _migrate("ticket_orders",   "guest_account_created", "INTEGER DEFAULT 0")
+        _migrate("ticket_orders",   "client_ip",            "TEXT")
+        _migrate("ticket_orders",   "client_user_agent",    "TEXT")
     # Ensure upload dirs exist
     for sub in ("images", "videos"):
         (UPLOAD_DIR / sub).mkdir(parents=True, exist_ok=True)
     # Start email scheduler (runs hourly)
     scheduler.add_job(_run_pending, "interval", hours=1, id="email_drip")
+    scheduler.add_job(_run_mail_sweep, "interval", minutes=10, id="mail_sweep")
     scheduler.start()
     yield
     scheduler.shutdown(wait=False)
@@ -85,6 +108,9 @@ for router in [
     sponsors.router,
     admin.router,
     campaigns.router,
+    inbox_routes.router,
+    settings_routes.router,
+    checkout.router,
 ]:
     app.include_router(router, prefix="/api")
 
@@ -100,8 +126,14 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR / "static")), name="
 @app.get("/tickets")
 @app.get("/contact")
 @app.get("/admin")
+@app.get("/buy")
 def serve_app():
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+    # Always revalidate — this is a single-page app, so a stale cached copy in a
+    # long-lived open tab silently keeps running old frontend code indefinitely.
+    return FileResponse(
+        str(FRONTEND_DIR / "index.html"),
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 @app.get("/health")

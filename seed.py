@@ -42,13 +42,14 @@ with engine.connect() as _conn:
     _add_col("event_interests", "first_name",        "TEXT")
     _add_col("event_interests", "last_name",         "TEXT")
     _add_col("event_interests", "instagram",         "TEXT")
+    _add_col("event_interests", "user_id",           "TEXT")
 
 db = SessionLocal()
 
 ADMIN_EMAIL = "ben@rntech.live"
 ADMIN_PASSWORD = "RNTech2025!"
 
-# ── Admin user ──────────────────────────────────────────────────────────────
+# ── Admin user — always ensure this exists ──────────────────────────────────
 if not db.query(User).filter(User.email == ADMIN_EMAIL).first():
     admin = User(
         id="u-admin",
@@ -63,6 +64,16 @@ if not db.query(User).filter(User.email == ADMIN_EMAIL).first():
     print(f"✓ Admin created: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
 else:
     print(f"  Admin already exists: {ADMIN_EMAIL}")
+
+# ── Content seeding — only on first ever deploy ─────────────────────────────
+# Marker file lives on the persistent volume so it survives redeploys.
+# Delete /app/data/.seeded on the machine if you want to re-seed from scratch.
+seed_marker = data_dir / ".seeded"
+if seed_marker.exists():
+    print("  Content already seeded — skipping (delete /app/data/.seeded to re-seed)")
+    db.close()
+    print("\n✅ Seed complete.")
+    sys.exit(0)
 
 # ── Events ──────────────────────────────────────────────────────────────────
 events_data = [
@@ -177,6 +188,9 @@ for sd in sponsors_data:
 
 db.commit()
 db.close()
+
+# Write marker so subsequent deploys skip content seeding
+seed_marker.touch()
 
 print("\n✅ Seed complete.")
 print(f"   Admin login: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")

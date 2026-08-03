@@ -68,14 +68,29 @@ class TicketType(Base):
     id = Column(String, primary_key=True, default=lambda: _uid("tkt-"))
     event_id = Column(String, ForeignKey("events.id", ondelete="CASCADE"))
     name = Column(String)
-    price = Column(Integer, default=0)      # pence
+    price = Column(Integer, default=0)      # pence (base price, used when not tiered)
     capacity = Column(Integer, default=100)
     sold_count = Column(Integer, default=0)
     active = Column(Boolean, default=True)
     description = Column(Text, default="")
+    is_tiered = Column(Boolean, default=False)
+    tiers_json = Column(Text, default="[]")  # [{capacity, price_pence}]
 
     event = relationship("Event", back_populates="ticket_types")
     tickets = relationship("Ticket", back_populates="ticket_type")
+
+    @property
+    def effective_price(self) -> int:
+        if self.is_tiered:
+            tiers = json.loads(self.tiers_json or "[]")
+            if tiers:
+                cumulative = 0
+                for tier in tiers:
+                    cumulative += tier.get("capacity", 0)
+                    if self.sold_count < cumulative:
+                        return tier.get("price_pence", 0)
+                return tiers[-1].get("price_pence", 0)
+        return self.price
 
 
 class Ticket(Base):
@@ -85,10 +100,12 @@ class Ticket(Base):
     ticket_type_id = Column(String, ForeignKey("ticket_types.id"))
     event_id = Column(String, ForeignKey("events.id"))
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
+    order_id = Column(String, ForeignKey("ticket_orders.id"), nullable=True)
     holder_name = Column(String)
     holder_email = Column(String)
     qr_code = Column(String)
     status = Column(String, default="valid")   # valid | used | cancelled
+    amount_paid_pence = Column(Integer, default=0)
     issued_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="tickets")
@@ -100,16 +117,44 @@ class EventInterest(Base):
 
     id = Column(String, primary_key=True, default=lambda: _uid("int-"))
     event_id = Column(String, ForeignKey("events.id", ondelete="CASCADE"))
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     name = Column(String, nullable=False)
     first_name = Column(String, nullable=True)
     last_name = Column(String, nullable=True)
     email = Column(String, nullable=False)
     instagram = Column(String, nullable=True)
     message = Column(Text, default="")
-    status = Column(String, default="pending")  # pending | approved | rejected
+    status = Column(String, default="pending")  # pending | invited | approved | rejected
+    invite_token = Column(String, unique=True, nullable=True, index=True)
+    invite_ticket_type_id = Column(String, ForeignKey("ticket_types.id"), nullable=True)
+    invite_discount_percent = Column(Integer, default=0)
+    invited_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     event = relationship("Event", back_populates="interests")
+
+
+class TicketOrder(Base):
+    __tablename__ = "ticket_orders"
+
+    id = Column(String, primary_key=True, default=lambda: _uid("ord-"))
+    event_id = Column(String, ForeignKey("events.id"))
+    ticket_type_id = Column(String, ForeignKey("ticket_types.id"))
+    interest_id = Column(String, ForeignKey("event_interests.id"), nullable=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    holder_name = Column(String)
+    holder_email = Column(String)
+    quantity = Column(Integer, default=1)
+    unit_price_pence = Column(Integer, default=0)
+    discount_pence = Column(Integer, default=0)
+    total_pence = Column(Integer, default=0)
+    stripe_session_id = Column(String, unique=True, nullable=True, index=True)
+    status = Column(String, default="pending")  # pending | paid | failed_capacity | cancelled
+    guest_account_created = Column(Boolean, default=False)
+    client_ip = Column(String, nullable=True)
+    client_user_agent = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    paid_at = Column(DateTime, nullable=True)
 
 
 class Mix(Base):
@@ -171,6 +216,15 @@ class EmailCampaign(Base):
     sends = relationship("EmailSend", back_populates="campaign", cascade="all, delete-orphan")
 
 
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    token = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+
+
 class EmailSend(Base):
     __tablename__ = "email_sends"
 
@@ -183,3 +237,10 @@ class EmailSend(Base):
 
     campaign = relationship("EmailCampaign", back_populates="sends")
     user = relationship("User", back_populates="email_sends")
+
+
+class SiteSettings(Base):
+    __tablename__ = "site_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, default="")

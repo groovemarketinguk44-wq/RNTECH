@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from ..database import get_db
 from ..models import ContactMessage
 from ..auth import require_admin
+from ..email_service import send_email, FROM_EMAIL
+from ..settings_utils import get_setting
 
 router = APIRouter()
 
@@ -27,6 +29,18 @@ def submit_message(data: MessageIn, db: Session = Depends(get_db)):
     )
     db.add(msg)
     db.commit()
+
+    notify_email = get_setting(db, "admin_notify_email") or FROM_EMAIL
+    if notify_email:
+        body = (
+            f"<h2 style='margin:0 0 20px;color:#1a1a2e;font-size:20px;'>New Message from Website</h2>"
+            f"<p style='margin:0 0 8px;'><strong>Name:</strong> {data.name}</p>"
+            f"<p style='margin:0 0 8px;'><strong>Email:</strong> <a href='mailto:{data.email}' style='color:#3272a8;'>{data.email}</a></p>"
+            f"<p style='margin:16px 0 8px;'><strong>Message:</strong></p>"
+            f"<blockquote style='border-left:3px solid #3272a8;padding:12px 16px;margin:0;background:#f9fafb;color:#333;border-radius:0 4px 4px 0;'>{data.message}</blockquote>"
+        )
+        send_email(notify_email, "RNTECH Admin", f"New message from {data.name}", body)
+
     return {"ok": True}
 
 

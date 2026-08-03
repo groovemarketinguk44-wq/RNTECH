@@ -220,33 +220,41 @@ function MixCard({ mix, onPlay, isPlaying }) {
 /* ─── Ticket Card ────────────────────────────────────────────────── */
 function TicketCard({ ticket }) {
   const qrRef = React.useRef(null);
+  const qrFullRef = React.useRef(null);
+  const [qrExpanded, setQrExpanded] = React.useState(false);
   const event = ticket.event || {};
 
-  React.useEffect(() => {
-    if (!qrRef.current || !ticket.qrCode) return;
-    qrRef.current.innerHTML = '';
+  function renderQR(el, size) {
+    if (!el || !ticket.qrCode) return;
+    el.innerHTML = '';
     if (typeof QRCode !== 'undefined') {
-      new QRCode(qrRef.current, {
-        text: ticket.qrCode,
-        width: 80,
-        height: 80,
-        colorDark: '#000000',
-        colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.H,
-      });
+      new QRCode(el, { text: ticket.qrCode, width: size, height: size, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H });
     } else {
-      qrRef.current.textContent = ticket.qrCode;
+      el.textContent = ticket.qrCode;
     }
-  }, [ticket.qrCode]);
+  }
+
+  React.useEffect(() => { renderQR(qrRef.current, 160); }, [ticket.qrCode]);
+  React.useEffect(() => { if (qrExpanded && qrFullRef.current) renderQR(qrFullRef.current, 280); }, [qrExpanded, ticket.qrCode]);
 
   return React.createElement(FuturisticCard,{active:ticket.status==='valid'},
+    qrExpanded && React.createElement('div', {
+      onClick: () => setQrExpanded(false),
+      style: { position:'fixed',inset:0,zIndex:900,background:'rgba(0,0,0,0.95)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20 }
+    },
+      React.createElement('div', { ref:qrFullRef, style:{background:'#fff',padding:16,borderRadius:8} }),
+      React.createElement('p', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:13} }, 'Tap to close')
+    ),
     React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20}},
       React.createElement('div',null,
         React.createElement(Chip,{label:ticket.status==='valid'?'Valid':ticket.status==='used'?'Used':'Cancelled',color:ticket.status==='valid'?'#10b981':'#64748b'}),
         React.createElement('h3',{style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:20,color:'#fff',margin:'8px 0 4px',textTransform:'uppercase'}},event.title||'Event Ticket'),
         React.createElement('div',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'#3272a8',fontSize:13,fontWeight:600}},ticket.ticketTypeName||'General Entry')
       ),
-      React.createElement('div',{ref:qrRef,style:{width:80,height:80,background:'#fff',borderRadius:4,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:8,fontFamily:'monospace',color:'#000',padding:2}})
+      React.createElement('div', { onClick:()=>setQrExpanded(true), style:{cursor:'pointer',flexShrink:0} },
+        React.createElement('div',{ref:qrRef,style:{width:160,height:160,background:'#fff',borderRadius:4,display:'flex',alignItems:'center',justifyContent:'center',fontSize:8,fontFamily:'monospace',color:'#000',padding:2}}),
+        React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.3)',fontSize:10,textAlign:'center',margin:'4px 0 0'}}, 'Tap to expand')
+      )
     ),
     React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
       [['HOLDER',ticket.holderName],['REF',ticket.id],['DATE',event.displayDate||'—'],['VENUE',event.venue||'—']].map(([label,val])=>
@@ -269,12 +277,23 @@ function AuthModal({ mode, onClose, onSuccess }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+
+  useEffect(() => { window.scrollTo(0, 0); }, []);
+
+  const switchTab = (t) => { setTab(t); setError(''); setForgotSent(false); };
 
   const submit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
+      if (tab === 'forgot') {
+        await window.RNTECH_API.forgotPassword(email);
+        setForgotSent(true);
+        setLoading(false);
+        return;
+      }
       let res;
       if (tab === 'login') {
         res = await window.RNTECH_API.login(email, password);
@@ -295,22 +314,88 @@ function AuthModal({ mode, onClose, onSuccess }) {
 
   const inputStyle = { width:'100%',padding:'12px 16px',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'#fff',fontSize:15,fontFamily:"'Space Grotesk',sans-serif",outline:'none',boxSizing:'border-box' };
 
-  return React.createElement('div',{style:{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,0.8)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20},onClick:onClose},
-    React.createElement('div',{onClick:e=>e.stopPropagation(),style:{background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:40,width:'100%',maxWidth:440,boxShadow:'0 0 60px rgba(50,114,168,0.2)'}},
-      React.createElement('h2',{style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:28,color:'#fff',margin:'0 0 8px',textTransform:'uppercase',letterSpacing:'-0.02em'}},tab==='login'?'Sign In':'Create Account'),
-      React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:14,marginBottom:28}},tab==='login'?'Welcome back to RNTECH.':'Join RNTECH. Get tickets and mixes all in one place.'),
-      React.createElement('form',{onSubmit:submit,style:{display:'flex',flexDirection:'column',gap:14}},
-        tab==='register'&&React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
-          React.createElement('input',{placeholder:'First Name',value:firstName,onChange:e=>setFirstName(e.target.value),required:true,style:inputStyle}),
-          React.createElement('input',{placeholder:'Last Name',value:lastName,onChange:e=>setLastName(e.target.value),required:true,style:inputStyle})
-        ),
-        React.createElement('input',{type:'email',placeholder:'Email Address',value:email,onChange:e=>setEmail(e.target.value),required:true,style:inputStyle}),
-        React.createElement('input',{type:'password',placeholder:'Password',value:password,onChange:e=>setPassword(e.target.value),required:true,minLength:6,style:inputStyle}),
-        tab==='register'&&React.createElement('input',{placeholder:'Instagram handle (optional)',value:instagram,onChange:e=>setInstagram(e.target.value),style:{...inputStyle,opacity:0.75}}),
-        error&&React.createElement('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:4,padding:'10px 14px',fontFamily:"'Space Grotesk',sans-serif",color:'#ef4444',fontSize:13}},error),
-        React.createElement('button',{type:'submit',disabled:loading,style:{padding:14,borderRadius:0,border:'none',cursor:loading?'wait':'pointer',background:'linear-gradient(135deg,#3272a8 0%,#06b6d4 100%)',color:'#fff',fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:14,letterSpacing:'0.08em',textTransform:'uppercase',boxShadow:'0 0 20px rgba(50,114,168,0.4)',opacity:loading?0.7:1}},loading?'Please wait…':tab==='login'?'Sign In':'Create Account'),
-        React.createElement('button',{type:'button',onClick:()=>{setTab(tab==='login'?'register':'login');setError('');},style:{background:'none',border:'none',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:13}},tab==='login'?'No account? Create one →':'← Already have an account? Sign in')
-      )
+  const heading = tab==='login' ? 'Sign In' : tab==='register' ? 'Create Account' : 'Reset Password';
+  const subtext = tab==='login' ? 'Welcome back to RNTECH.' : tab==='register' ? 'Join RNTECH. Get tickets and mixes all in one place.' : 'Enter your email and we\'ll send you a reset link.';
+
+  return React.createElement('div',{className:'modal-overlay',style:{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,0.8)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20},onClick:onClose},
+    React.createElement('div',{className:'modal-sheet',onClick:e=>e.stopPropagation(),style:{background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:40,width:'100%',maxWidth:440,boxShadow:'0 0 60px rgba(50,114,168,0.2)'}},
+      React.createElement('div',{className:'modal-handle'}),
+      React.createElement('h2',{style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:28,color:'#fff',margin:'0 0 8px',textTransform:'uppercase',letterSpacing:'-0.02em'}},heading),
+      React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:14,marginBottom:28}},subtext),
+      forgotSent
+        ? React.createElement('div',{style:{textAlign:'center',padding:'20px 0'}},
+            React.createElement('div',{style:{fontSize:36,marginBottom:12}},'✉'),
+            React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'#06b6d4',fontWeight:700,fontSize:15,textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:8}},'Check your inbox'),
+            React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:13,marginBottom:24}},'If that email is registered, a reset link is on its way. Check spam if you don\'t see it.'),
+            React.createElement('button',{type:'button',onClick:()=>switchTab('login'),style:{background:'none',border:'none',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:13}},'← Back to Sign In')
+          )
+        : React.createElement('form',{onSubmit:submit,style:{display:'flex',flexDirection:'column',gap:14}},
+            tab==='register'&&React.createElement('div',{className:'name-row',style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+              React.createElement('input',{placeholder:'First Name',value:firstName,onChange:e=>setFirstName(e.target.value),required:true,style:inputStyle}),
+              React.createElement('input',{placeholder:'Last Name',value:lastName,onChange:e=>setLastName(e.target.value),required:true,style:inputStyle})
+            ),
+            React.createElement('input',{type:'email',placeholder:'Email Address',value:email,onChange:e=>setEmail(e.target.value),required:true,style:inputStyle}),
+            tab!=='forgot'&&React.createElement('input',{type:'password',placeholder:'Password',value:password,onChange:e=>setPassword(e.target.value),required:true,minLength:6,style:inputStyle}),
+            tab==='register'&&React.createElement('input',{placeholder:'Instagram handle (optional)',value:instagram,onChange:e=>setInstagram(e.target.value),style:{...inputStyle,opacity:0.75}}),
+            error&&React.createElement('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:4,padding:'10px 14px',fontFamily:"'Space Grotesk',sans-serif",color:'#ef4444',fontSize:13}},error),
+            React.createElement('button',{type:'submit',disabled:loading,style:{padding:14,borderRadius:0,border:'none',cursor:loading?'wait':'pointer',background:'linear-gradient(135deg,#3272a8 0%,#06b6d4 100%)',color:'#fff',fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:14,letterSpacing:'0.08em',textTransform:'uppercase',boxShadow:'0 0 20px rgba(50,114,168,0.4)',opacity:loading?0.7:1}},loading?'Please wait…':tab==='login'?'Sign In':tab==='forgot'?'Send Reset Link':'Create Account'),
+            React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-start',marginTop:4}},
+              tab==='login'&&React.createElement('button',{type:'button',onClick:()=>switchTab('forgot'),style:{background:'none',border:'none',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.35)',fontSize:12,padding:0}},'Forgot your password?'),
+              React.createElement('button',{type:'button',onClick:()=>switchTab(tab==='register'?'login':tab==='forgot'?'login':'register'),style:{background:'none',border:'none',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:13,padding:0}},
+                tab==='login'?'No account? Create one →':tab==='forgot'?'← Back to Sign In':'← Already have an account? Sign in'
+              )
+            )
+          )
+    )
+  );
+}
+
+/* ─── Reset Password Modal ───────────────────────────────────────── */
+function ResetPasswordModal({ token, onClose, onSuccess }) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const inputStyle = { width:'100%',padding:'12px 16px',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'#fff',fontSize:15,fontFamily:"'Space Grotesk',sans-serif",outline:'none',boxSizing:'border-box' };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (password !== confirm) { setError('Passwords don\'t match.'); return; }
+    setLoading(true);
+    try {
+      await window.RNTECH_API.resetPassword(token, password);
+      setDone(true);
+    } catch(err) {
+      setError(err.message || 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return React.createElement('div',{className:'modal-overlay',style:{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,0.8)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20},onClick:done?onClose:undefined},
+    React.createElement('div',{className:'modal-sheet',onClick:e=>e.stopPropagation(),style:{background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:40,width:'100%',maxWidth:440,boxShadow:'0 0 60px rgba(50,114,168,0.2)'}},
+      React.createElement('div',{className:'modal-handle'}),
+      done
+        ? React.createElement('div',{style:{textAlign:'center',padding:'20px 0'}},
+            React.createElement('div',{style:{fontSize:40,marginBottom:12}},'✓'),
+            React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'#06b6d4',fontWeight:700,fontSize:16,textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:8}},'Password updated!'),
+            React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:13,marginBottom:24}},'You can now sign in with your new password.'),
+            React.createElement('button',{onClick:onSuccess,style:{padding:'12px 28px',background:'linear-gradient(135deg,#3272a8 0%,#06b6d4 100%)',border:'none',color:'#fff',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'0.08em',textTransform:'uppercase'}},'Sign In')
+          )
+        : React.createElement('div',null,
+            React.createElement('h2',{style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:26,color:'#fff',margin:'0 0 8px',textTransform:'uppercase',letterSpacing:'-0.02em'}},'New Password'),
+            React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:14,marginBottom:28}},'Choose a new password for your account.'),
+            React.createElement('form',{onSubmit:submit,style:{display:'flex',flexDirection:'column',gap:14}},
+              React.createElement('input',{type:'password',placeholder:'New password',value:password,onChange:e=>setPassword(e.target.value),required:true,minLength:6,style:inputStyle,autoFocus:true}),
+              React.createElement('input',{type:'password',placeholder:'Confirm new password',value:confirm,onChange:e=>setConfirm(e.target.value),required:true,style:inputStyle}),
+              error&&React.createElement('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:4,padding:'10px 14px',fontFamily:"'Space Grotesk',sans-serif",color:'#ef4444',fontSize:13}},error),
+              React.createElement('button',{type:'submit',disabled:loading,style:{padding:14,borderRadius:0,border:'none',cursor:loading?'wait':'pointer',background:'linear-gradient(135deg,#3272a8 0%,#06b6d4 100%)',color:'#fff',fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:14,letterSpacing:'0.08em',textTransform:'uppercase',boxShadow:'0 0 20px rgba(50,114,168,0.4)',opacity:loading?0.7:1}},loading?'Saving…':'Set New Password')
+            )
+          )
     )
   );
 }
@@ -414,7 +499,66 @@ function MiniPlayer({ mix, videoRef, onClose, onWatch }) {
   );
 }
 
+/* ─── Profile Modal ──────────────────────────────────────────────── */
+function ProfileModal({ user, onClose, onSaved }) {
+  const [firstName, setFirstName] = useState(user.firstName || user.name?.split(' ')[0] || '');
+  const [lastName, setLastName]   = useState(user.lastName  || user.name?.split(' ').slice(1).join(' ') || '');
+  const [instagram, setInstagram] = useState(user.instagram || '');
+  const [error, setError]   = useState('');
+  const [saved, setSaved]   = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const inputStyle = { width:'100%',padding:'12px 16px',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'#fff',fontSize:15,fontFamily:"'Space Grotesk',sans-serif",outline:'none',boxSizing:'border-box' };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!firstName.trim() || !lastName.trim()) { setError('First and last name are required.'); return; }
+    setLoading(true);
+    try {
+      const updated = await window.RNTECH_API.updateProfile(firstName.trim(), lastName.trim(), instagram.trim());
+      window.RNTECH_AUTH.setUser(updated);
+      setSaved(true);
+      onSaved(updated);
+    } catch (err) {
+      setError(err.message || 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return React.createElement('div',{className:'modal-overlay',style:{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,0.8)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20},onClick:onClose},
+    React.createElement('div',{className:'modal-sheet',onClick:e=>e.stopPropagation(),style:{background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:40,width:'100%',maxWidth:440,boxShadow:'0 0 60px rgba(50,114,168,0.2)'}},
+      React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:24}},
+        React.createElement('div',null,
+          React.createElement('h2',{style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:26,color:'#fff',margin:'0 0 4px',textTransform:'uppercase',letterSpacing:'-0.02em'}},'My Profile'),
+          React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:13,margin:0}},'Update your name and Instagram')
+        ),
+        React.createElement('button',{onClick:onClose,style:{background:'none',border:'1px solid rgba(255,255,255,0.15)',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:'6px 12px',fontSize:12,fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase'}},'✕ CLOSE')
+      ),
+      saved
+        ? React.createElement('div',{style:{textAlign:'center',padding:'32px 0'}},
+            React.createElement('div',{style:{fontSize:40,marginBottom:16}},'✓'),
+            React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'#06b6d4',fontWeight:700,fontSize:16,textTransform:'uppercase',letterSpacing:'0.08em'}},'Profile updated!'),
+            React.createElement('button',{onClick:onClose,style:{marginTop:20,padding:'10px 28px',background:'none',border:'1px solid rgba(50,114,168,0.4)',color:'#3272a8',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'0.08em',textTransform:'uppercase'}},'Close')
+          )
+        : React.createElement('form',{onSubmit:submit,style:{display:'flex',flexDirection:'column',gap:14}},
+            React.createElement('div',{className:'name-row',style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+              React.createElement('input',{placeholder:'First Name',value:firstName,onChange:e=>setFirstName(e.target.value),required:true,style:inputStyle}),
+              React.createElement('input',{placeholder:'Last Name',value:lastName,onChange:e=>setLastName(e.target.value),required:true,style:inputStyle})
+            ),
+            React.createElement('div',{style:{position:'relative'}},
+              React.createElement('span',{style:{position:'absolute',left:14,top:'50%',transform:'translateY(-50%)',color:'rgba(255,255,255,0.35)',fontSize:15,pointerEvents:'none'}},'@'),
+              React.createElement('input',{placeholder:'Instagram handle (optional)',value:instagram,onChange:e=>setInstagram(e.target.value.replace(/^@/,'')),style:{...inputStyle,paddingLeft:28,opacity:0.85}})
+            ),
+            error&&React.createElement('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:4,padding:'10px 14px',fontFamily:"'Space Grotesk',sans-serif",color:'#ef4444',fontSize:13}},error),
+            React.createElement('button',{type:'submit',disabled:loading,style:{padding:14,borderRadius:0,border:'none',cursor:loading?'wait':'pointer',background:'linear-gradient(135deg,#3272a8 0%,#06b6d4 100%)',color:'#fff',fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:14,letterSpacing:'0.08em',textTransform:'uppercase',boxShadow:'0 0 20px rgba(50,114,168,0.4)',opacity:loading?0.7:1}},loading?'Saving…':'Save Changes')
+          )
+    )
+  );
+}
+
 Object.assign(window, {
   StarField, GlowButton, Chip, SectionHeader, FuturisticCard, Spinner,
-  EventCard, MixCard, TicketCard, AuthModal, MiniPlayer, VideoModal,
+  EventCard, MixCard, TicketCard, AuthModal, ProfileModal, ResetPasswordModal, MiniPlayer, VideoModal,
 });

@@ -4,10 +4,28 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#020810" />
-  <title>RNTECH — RnB Meets Tech House</title>
+  <title>RNTECH - To The Stars</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png" />
+  <link rel="apple-touch-icon" href="/static/favicon.png" />
+  <meta property="og:title" content="RNTECH - To The Stars" />
+  <meta property="og:description" content="RnB meets Tech House. St Albans." />
+  <meta name="description" content="RnB meets Tech House. St Albans." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Orbitron:wght@200;300;400;700&display=swap" rel="stylesheet" />
   <link href="https://fonts.cdnfonts.com/css/ethnocentric" rel="stylesheet" />
+  <!-- Meta Pixel — PageView only; InitiateCheckout/Purchase/CompleteRegistration are sent server-side via Conversions API to avoid double-counting -->
+  <script>
+    !function(f,b,e,v,n,t,s)
+    {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];
+    s.parentNode.insertBefore(t,s)}(window, document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init', '1068567272281457');
+    fbq('track', 'PageView');
+  </script>
   <link rel="manifest" href="/static/manifest.json" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -32,9 +50,13 @@
       from { filter: drop-shadow(0 0 20px rgba(50,114,168,0.6)) drop-shadow(0 0 40px rgba(6,182,212,0.3)); }
       to   { filter: drop-shadow(0 0 40px rgba(50,114,168,1))   drop-shadow(0 0 80px rgba(6,182,212,0.6)) drop-shadow(0 0 120px rgba(99,102,241,0.4)); }
     }
+    /* Deliberately animates only opacity, not transform: an animated transform
+       (even one that ends at an identity value) makes this element a permanent
+       containing block for any position:fixed descendant — which broke every
+       full-screen modal rendered inside <main class="page-enter">. */
     @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(16px); }
-      to   { opacity: 1; transform: translateY(0); }
+      from { opacity: 0; }
+      to   { opacity: 1; }
     }
     @keyframes spin {
       to { transform: rotate(360deg); }
@@ -42,6 +64,31 @@
     @keyframes starShimmer {
       0%   { background-position: -200% center; }
       100% { background-position: 200% center; }
+    }
+    /* Prevent body scroll whenever any modal is open */
+    body:has(.modal-overlay) { overflow: hidden; }
+    .modal-overlay { touch-action: none; }
+    .modal-sheet   {
+      touch-action: pan-y;
+      overscroll-behavior: contain;
+      max-height: 88vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    @media (max-width: 680px) {
+      .modal-overlay {
+        padding: 20px !important;
+        align-items: center !important;
+      }
+      .modal-sheet {
+        width: 100% !important;
+        max-width: 420px !important;
+        margin: 0 auto !important;
+        padding: 20px 16px 28px !important;
+        box-sizing: border-box !important;
+      }
+      .name-row { grid-template-columns: 1fr !important; }
     }
     .page-enter { animation: fadeIn 0.35s ease forwards; }
 
@@ -134,7 +181,7 @@
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/html5-qrcode/minified/html5-qrcode.min.js" crossorigin="anonymous"></script>
+<script src="/static/jsqr.js"></script>
 
 <script src="/static/ui.jsx"></script>
 <script src="/static/pages.jsx"></script>
@@ -152,9 +199,40 @@ const NAV_ITEMS = [
 ];
 
 function App() {
-  const [page, setPage] = useState('home');
+  const [page, setPage] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get('checkout')) return 'tickets';
+    if (window.location.pathname === '/buy') return 'events';
+    return 'home';
+  });
   const [user, setUser] = useState(() => window.RNTECH_AUTH.getUser());
   const [authModal, setAuthModal] = useState(null);
+  const [showProfile, setShowProfile] = useState(false);
+  const [resetToken, setResetToken] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    return p.get('reset') || null;
+  });
+  const [inviteToken, setInviteToken] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    return p.get('invite') || null;
+  });
+  const [checkoutInfo] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    const status = p.get('checkout');
+    if (!status) return null;
+    return { status, orderId: p.get('order') || null };
+  });
+
+  const [pendingEventIntent, setPendingEventIntent] = useState(() => {
+    return window.location.pathname === '/buy' ? { eventId: 'featured', action: 'ticket' } : null;
+  }); // { eventId, action: 'ticket'|'detail' } — 'featured' resolves to the current featured event
+
+  // Strip one-shot query params (invite/checkout/reset) and the /buy path from the URL after reading them
+  useEffect(() => {
+    if (inviteToken || checkoutInfo || resetToken || pendingEventIntent) {
+      window.history.replaceState({}, '', '/');
+    }
+  }, []);
   const [currentMix, setCurrentMix] = useState(null);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
@@ -217,7 +295,11 @@ function App() {
   const onAuth = useCallback((mode) => setAuthModal(mode), []);
   const onAuthSuccess = useCallback((u) => { setUser(u); setAuthModal(null); }, []);
   const onLogout = useCallback(() => { window.RNTECH_AUTH.logout(); setUser(null); }, []);
-  const onNavigate = useCallback((p) => { setPage(p); setShowAdmin(false); window.scrollTo(0, 0); }, []);
+  const onProfileSaved = useCallback((u) => { setUser(u); }, []);
+  const onNavigate = useCallback((p, intent) => {
+    setPage(p); setShowAdmin(false); window.scrollTo(0, 0);
+    if (intent) setPendingEventIntent(intent);
+  }, []);
 
   const activePage = showAdmin ? 'admin' : page;
 
@@ -225,9 +307,9 @@ function App() {
     const props = { user, onAuth, onLogin: onAuthSuccess, onNavigate, onPlayMix: handlePlayMix, currentMix };
     switch (activePage) {
       case 'home':    return React.createElement(PageHome, props);
-      case 'events':  return React.createElement(PageEvents, props);
+      case 'events':  return React.createElement(PageEvents, { ...props, pendingEventIntent, onConsumeEventIntent: () => setPendingEventIntent(null) });
       case 'mixes':   return React.createElement(PageMixes, props);
-      case 'tickets': return React.createElement(PageTickets, props);
+      case 'tickets': return React.createElement(PageTickets, { ...props, checkoutInfo });
       case 'contact': return React.createElement(PageContact, props);
       case 'admin':   return React.createElement(PageAdmin, { user });
       default:        return React.createElement(PageHome, props);
@@ -259,7 +341,11 @@ function App() {
       React.createElement('div', { className: 'nav-right' },
         user ? React.createElement('div', { className: 'nav-user-badge' },
           React.createElement('div', { className: 'nav-user-dot' }),
-          React.createElement('span', null, user.name.split(' ')[0]),
+          React.createElement('button', {
+            onClick: () => setShowProfile(true),
+            style: { background:'none',border:'none',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.7)',fontSize:13,fontWeight:600,padding:'4px 6px',textDecoration:'underline',textDecorationColor:'rgba(50,114,168,0.5)' },
+            title: 'Edit profile'
+          }, user.name.split(' ')[0]),
           React.createElement('button', {
             onClick: onLogout,
             style: { background:'none',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:'6px 12px',fontSize:12,fontWeight:600,letterSpacing:'0.05em',textTransform:'uppercase' }
@@ -308,6 +394,22 @@ function App() {
 
     // Auth Modal
     authModal && React.createElement(AuthModal, { mode: authModal, onClose: () => setAuthModal(null), onSuccess: onAuthSuccess }),
+
+    // Profile Modal
+    showProfile && user && React.createElement(ProfileModal, { user, onClose: () => setShowProfile(false), onSaved: onProfileSaved }),
+
+    // Password Reset Modal (triggered by ?reset=TOKEN in URL)
+    resetToken && React.createElement(ResetPasswordModal, {
+      token: resetToken,
+      onClose: () => { setResetToken(null); window.history.replaceState({}, '', '/'); },
+      onSuccess: () => { setResetToken(null); window.history.replaceState({}, '', '/'); setAuthModal('login'); },
+    }),
+
+    // Waitlist "invite to buy" modal (triggered by ?invite=TOKEN in URL)
+    inviteToken && React.createElement(InviteModal, {
+      token: inviteToken,
+      onClose: () => setInviteToken(null),
+    }),
 
     // Mini Player
     currentMix && React.createElement(MiniPlayer, {

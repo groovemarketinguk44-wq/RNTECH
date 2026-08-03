@@ -3,23 +3,28 @@ import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 import os
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 from ..database import get_db
 from ..models import Event, TicketType, EventInterest, Ticket, User, EmailCampaign, EmailSend
 from ..auth import require_admin, require_user, hash_password, verify_password, create_token, get_current_user
+from ..email_service import send_email
 
 router = APIRouter()
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://rntech.live")
 
 
 def _tt_dict(tt: TicketType) -> dict:
+    tiers = json.loads(tt.tiers_json or "[]")
+    total_capacity = sum(t.get("capacity", 0) for t in tiers) if tt.is_tiered and tiers else tt.capacity
     return {
         "id": tt.id, "eventId": tt.event_id, "name": tt.name,
-        "price": tt.price, "capacity": tt.capacity, "soldCount": tt.sold_count,
+        "price": tt.effective_price, "capacity": total_capacity, "soldCount": tt.sold_count,
         "active": tt.active, "description": tt.description,
+        "isTiered": bool(tt.is_tiered), "tiers": tiers,
     }
 
 
@@ -58,12 +63,12 @@ def get_event(event_id: str, db: Session = Depends(get_db)):
 
 class EventIn(BaseModel):
     title: str
-    date: str
-    displayDate: str
-    startTime: str
+    date: str = ""
+    displayDate: str = ""
+    startTime: str = ""
     endTime: str = ""
-    venue: str
-    location: str
+    venue: str = ""
+    location: str = ""
     description: str = ""
     lineup: List[dict] = []
     giveaways: List[str] = []
@@ -150,24 +155,52 @@ async def upload_poster(event_id: str, file: UploadFile = File(...),
     return {"posterImage": f"/uploads/images/{filename}"}
 
 
+@router.delete("/admin/events/{event_id}/poster", status_code=204)
+def remove_poster(event_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    e = db.query(Event).filter(Event.id == event_id).first()
+    if not e:
+        raise HTTPException(404, "Event not found")
+    if e.poster_image:
+        poster_path = UPLOAD_DIR / e.poster_image
+        if poster_path.exists():
+            poster_path.unlink(missing_ok=True)
+        e.poster_image = None
+        db.commit()
+
+
 # ── Admin: Ticket Types CRUD ─────────────────────────────────────────────────
 
 class TicketTypeIn(BaseModel):
     eventId: str
     name: str
-    price: int = 0
+    price: int = 0          # pence, used when not tiered
     capacity: int = 100
     description: str = ""
     active: bool = True
+    isTiered: bool = False
+    tiers: List[dict] = []  # [{capacity: int, price_pence: int}]
+
+
+def _apply_tt_data(tt: TicketType, data: TicketTypeIn):
+    tt.name = data.name
+    tt.description = data.description
+    tt.active = data.active
+    if data.isTiered and data.tiers:
+        tt.is_tiered = True
+        tt.tiers_json = json.dumps(data.tiers)
+        tt.capacity = sum(t.get("capacity", 0) for t in data.tiers)
+        tt.price = data.tiers[0].get("price_pence", 0)
+    else:
+        tt.is_tiered = False
+        tt.tiers_json = "[]"
+        tt.price = data.price
+        tt.capacity = data.capacity
 
 
 @router.post("/admin/ticket-types")
 def create_ticket_type(data: TicketTypeIn, db: Session = Depends(get_db), _=Depends(require_admin)):
-    tt = TicketType(
-        id="tkt-" + secrets.token_hex(8),
-        event_id=data.eventId, name=data.name, price=data.price,
-        capacity=data.capacity, description=data.description, active=data.active,
-    )
+    tt = TicketType(id="tkt-" + secrets.token_hex(8), event_id=data.eventId)
+    _apply_tt_data(tt, data)
     db.add(tt)
     db.commit()
     db.refresh(tt)
@@ -179,11 +212,7 @@ def update_ticket_type(tt_id: str, data: TicketTypeIn, db: Session = Depends(get
     tt = db.query(TicketType).filter(TicketType.id == tt_id).first()
     if not tt:
         raise HTTPException(404, "Ticket type not found")
-    tt.name = data.name
-    tt.price = data.price
-    tt.capacity = data.capacity
-    tt.description = data.description
-    tt.active = data.active
+    _apply_tt_data(tt, data)
     db.commit()
     db.refresh(tt)
     return _tt_dict(tt)
@@ -209,6 +238,10 @@ def _interest_dict(i: EventInterest) -> dict:
         "email": i.email,
         "instagram": i.instagram or "",
         "status": i.status, "createdAt": i.created_at.isoformat(),
+        "inviteTicketTypeId": i.invite_ticket_type_id,
+        "inviteToken": i.invite_token,
+        "inviteDiscountPercent": i.invite_discount_percent or 0,
+        "invitedAt": i.invited_at.isoformat() if i.invited_at else None,
     }
 
 
@@ -277,6 +310,7 @@ def submit_interest(event_id: str, data: InterestIn, db: Session = Depends(get_d
 
     interest = EventInterest(
         event_id=event_id,
+        user_id=user.id if user else None,
         name=f"{first} {last}",
         first_name=first,
         last_name=last,
@@ -310,6 +344,7 @@ def my_interests(db: Session = Depends(get_db), current_user=Depends(require_use
             "id": i.id,
             "status": i.status,
             "createdAt": i.created_at.isoformat(),
+            "inviteToken": i.invite_token,
             "event": {
                 "id": event.id,
                 "title": event.title,
@@ -337,6 +372,13 @@ def approve_interest(interest_id: str, db: Session = Depends(get_db), _=Depends(
         raise HTTPException(404, "Not found")
     i.status = "approved"
     ticket_id = None
+    # Resolve user — use stored user_id or fall back to email lookup
+    linked_user_id = i.user_id
+    if not linked_user_id:
+        u = db.query(User).filter(User.email == i.email).first()
+        if u:
+            linked_user_id = u.id
+            i.user_id = u.id
     tt = db.query(TicketType).filter(
         TicketType.event_id == i.event_id, TicketType.active == True
     ).first()
@@ -344,7 +386,7 @@ def approve_interest(interest_id: str, db: Session = Depends(get_db), _=Depends(
         t = Ticket(
             ticket_type_id=tt.id,
             event_id=i.event_id,
-            user_id=None,
+            user_id=linked_user_id,
             holder_name=i.name,
             holder_email=i.email,
             qr_code=secrets.token_hex(6).upper(),
@@ -359,6 +401,155 @@ def approve_interest(interest_id: str, db: Session = Depends(get_db), _=Depends(
     if ticket_id:
         d["ticketId"] = ticket_id
     return d
+
+
+class InviteIn(BaseModel):
+    discountPercent: int = 0
+
+
+def _prepare_invite(i: EventInterest, discount_percent: int) -> str:
+    """Marks an interest as invited and returns their personal checkout link. No network calls.
+    The discount applies event-wide — the recipient picks any active paid ticket type
+    on the event page, rather than being locked to one tier chosen in advance."""
+    i.invite_token = secrets.token_urlsafe(24)
+    i.invite_discount_percent = discount_percent
+    i.invited_at = datetime.utcnow()
+    i.status = "invited"
+    return f"{FRONTEND_URL}/?invite={i.invite_token}"
+
+
+def _email_invite(email: str, name: str, event_title: str, discount_percent: int, link: str):
+    offer_line = f"<p>You've got <b>{discount_percent}% off</b> any ticket type for this event.</p>" if discount_percent > 0 else ""
+    try:
+        send_email(
+            email, name,
+            f"You're invited — grab your ticket to {event_title}",
+            f"<p>Good news — you're off the waitlist for <b>{event_title}</b>!</p>"
+            f"{offer_line}"
+            f"<p><a href='{link}' style='background:#3272a8;color:#fff;padding:12px 20px;"
+            f"text-decoration:none;display:inline-block;'>Buy your ticket</a></p>"
+            f"<p>Or copy this link: {link}</p>",
+        )
+    except Exception:
+        pass
+
+
+def _send_invite(i: EventInterest, discount_percent: int, event_title: str) -> str:
+    """Marks an interest as invited and emails their personal checkout link. Returns the link."""
+    link = _prepare_invite(i, discount_percent)
+    _email_invite(i.email, i.name, event_title, discount_percent, link)
+    return link
+
+
+@router.put("/admin/interest/{interest_id}/invite")
+def invite_interest(interest_id: str, data: InviteIn, db: Session = Depends(get_db), _=Depends(require_admin)):
+    i = db.query(EventInterest).filter(EventInterest.id == interest_id).first()
+    if not i:
+        raise HTTPException(404, "Not found")
+    if i.status == "approved":
+        raise HTTPException(400, "This person already has a ticket")
+    if not (0 <= data.discountPercent <= 100):
+        raise HTTPException(400, "Discount must be between 0 and 100")
+
+    event = db.query(Event).filter(Event.id == i.event_id).first()
+    link = _send_invite(i, data.discountPercent, event.title if event else "the event")
+    db.commit()
+
+    d = _interest_dict(i)
+    d["inviteLink"] = link
+    return d
+
+
+class BulkInviteIn(BaseModel):
+    interestIds: List[str]
+    eventId: str
+    discountPercent: int = 0
+
+
+@router.post("/admin/interest/bulk-invite")
+def bulk_invite_interest(data: BulkInviteIn, db: Session = Depends(get_db), _=Depends(require_admin)):
+    if not data.interestIds:
+        raise HTTPException(400, "No one selected")
+    if not (0 <= data.discountPercent <= 100):
+        raise HTTPException(400, "Discount must be between 0 and 100")
+
+    event = db.query(Event).filter(Event.id == data.eventId).first()
+    if not event:
+        raise HTTPException(404, "Event not found")
+    event_title = event.title
+
+    invited, skipped = [], []
+    for interest_id in data.interestIds:
+        i = db.query(EventInterest).filter(EventInterest.id == interest_id).first()
+        if not i:
+            skipped.append({"id": interest_id, "reason": "not found"})
+            continue
+        if i.event_id != data.eventId:
+            skipped.append({"id": interest_id, "reason": "different event"})
+            continue
+        if i.status == "approved":
+            skipped.append({"id": interest_id, "reason": "already has a ticket"})
+            continue
+        _send_invite(i, data.discountPercent, event_title)
+        invited.append(interest_id)
+
+    db.commit()
+    return {"invited": invited, "skipped": skipped}
+
+
+@router.post("/admin/events/{event_id}/invite-attendees")
+def invite_all_attendees(
+    event_id: str, data: InviteIn, background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db), _=Depends(require_admin),
+):
+    """Invites every registered attendee who isn't already on this event's waitlist
+    (pending/invited/rejected/approved) and doesn't already hold a ticket for it."""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Event not found")
+    if not (0 <= data.discountPercent <= 100):
+        raise HTTPException(400, "Discount must be between 0 and 100")
+
+    already_on_waitlist = {
+        i.email for i in db.query(EventInterest).filter(EventInterest.event_id == event_id).all()
+    }
+    already_ticketed_user_ids = {
+        t.user_id for t in db.query(Ticket).filter(
+            Ticket.event_id == event_id, Ticket.user_id.isnot(None)
+        ).all()
+    }
+
+    users = db.query(User).filter(User.role == "user").all()
+    to_invite = [
+        u for u in users
+        if u.email not in already_on_waitlist and u.id not in already_ticketed_user_ids
+    ]
+
+    to_email = []  # (email, name, link) — dispatched after commit, in the background
+    for u in to_invite:
+        i = EventInterest(
+            event_id=event_id, user_id=u.id, name=u.name,
+            first_name=u.first_name, last_name=u.last_name,
+            email=u.email, instagram=u.instagram, status="pending",
+        )
+        db.add(i)
+        db.flush()
+        link = _prepare_invite(i, data.discountPercent)
+        to_email.append((u.email, u.name, link))
+    db.commit()
+
+    event_title = event.title
+    discount_percent = data.discountPercent
+
+    discount_percent = data.discountPercent
+
+    def _send_all():
+        for email, name, link in to_email:
+            _email_invite(email, name, event_title, discount_percent, link)
+
+    background_tasks.add_task(_send_all)
+
+    return {"invited": len(to_invite), "alreadyHandled": len(users) - len(to_invite)}
 
 
 @router.put("/admin/interest/{interest_id}/reject")

@@ -7,6 +7,7 @@ from ..database import get_db
 from ..models import EmailCampaign, EmailSend, User
 from ..auth import require_admin
 from ..email_service import send_email
+from ..settings_utils import get_setting
 
 router = APIRouter()
 
@@ -86,12 +87,13 @@ def blast_campaign(campaign_id: str, db: Session = Depends(get_db), _=Depends(re
         db.query(EmailSend).filter(EmailSend.campaign_id == c.id, EmailSend.status == "sent").all()
     }
     subscribers = db.query(User).filter(User.subscribed == True, User.role == "user").all()
+    sig = get_setting(db, "email_signature")
 
     sent = 0
     for user in subscribers:
         if user.id in already_sent:
             continue
-        ok = send_email(user.email, user.name, c.subject, c.body_html)
+        ok = send_email(user.email, user.name, c.subject, c.body_html, sig)
         existing = db.query(EmailSend).filter(
             EmailSend.campaign_id == c.id, EmailSend.user_id == user.id
         ).first()
@@ -119,13 +121,14 @@ def process_pending_sends(db: Session):
         EmailSend.status == "pending",
         EmailSend.scheduled_for <= now,
     ).all()
+    sig = get_setting(db, "email_signature") if pending else ""
     for send in pending:
         user = send.user
         campaign = send.campaign
         if not user or not campaign or not user.subscribed:
             send.status = "skipped"
             continue
-        ok = send_email(user.email, user.name, campaign.subject, campaign.body_html)
+        ok = send_email(user.email, user.name, campaign.subject, campaign.body_html, sig)
         send.status = "sent" if ok else "failed"
         send.sent_at = now
     db.commit()

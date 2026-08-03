@@ -1,15 +1,23 @@
+import os
 import secrets
 import io
 import csv
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..database import get_db
 from ..models import Ticket, TicketType, Event, User
-from ..auth import require_user, require_admin, get_current_user
+from ..auth import require_user, require_admin, get_current_user, get_or_create_guest_user
+from .. import meta_capi
+from .checkout import _send_ticket_confirmation
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://rntech.live")
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+MAX_QUANTITY = 10
 
 
 def _ticket_dict(t: Ticket) -> dict:
@@ -25,6 +33,7 @@ class TicketIn(BaseModel):
     ticketTypeId: str
     holderName: str
     holderEmail: str
+    quantity: int = 1
 
 
 class AdminTicketIn(BaseModel):
@@ -34,28 +43,69 @@ class AdminTicketIn(BaseModel):
 
 
 @router.post("/tickets")
-def issue_ticket(data: TicketIn, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def issue_ticket(data: TicketIn, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    quantity = data.quantity
+    if quantity < 1 or quantity > MAX_QUANTITY:
+        raise HTTPException(400, f"Quantity must be between 1 and {MAX_QUANTITY}")
+
+    holder_name = data.holderName.strip()
+    holder_email = data.holderEmail.strip().lower()
+    if not holder_name or not holder_email:
+        raise HTTPException(400, "Name and email are required")
+
+    guest_created = False
+    if not user:
+        user, guest_created = get_or_create_guest_user(db, holder_name, holder_email)
+
     tt = db.query(TicketType).filter(TicketType.id == data.ticketTypeId, TicketType.active == True).first()
     if not tt:
         raise HTTPException(404, "Ticket type not found")
-    if tt.sold_count >= tt.capacity:
-        raise HTTPException(400, "Sorry, this ticket type is sold out")
+    if tt.sold_count + quantity > tt.capacity:
+        remaining = max(tt.capacity - tt.sold_count, 0)
+        raise HTTPException(400, f"Only {remaining} of this ticket type left")
 
-    ticket = Ticket(
-        id="RNT-" + secrets.token_hex(6).upper(),
-        ticket_type_id=tt.id,
-        event_id=tt.event_id,
-        user_id=user.id,
-        holder_name=data.holderName,
-        holder_email=data.holderEmail,
-        qr_code=secrets.token_hex(6).upper(),
-        status="valid",
-    )
-    tt.sold_count += 1
-    db.add(ticket)
+    tickets = []
+    for _ in range(quantity):
+        ticket = Ticket(
+            id="RNT-" + secrets.token_hex(6).upper(),
+            ticket_type_id=tt.id,
+            event_id=tt.event_id,
+            user_id=user.id,
+            holder_name=holder_name,
+            holder_email=holder_email,
+            qr_code=secrets.token_hex(6).upper(),
+            status="valid",
+        )
+        tt.sold_count += 1
+        db.add(ticket)
+        tickets.append(ticket)
     db.commit()
-    db.refresh(ticket)
-    return _ticket_dict(ticket)
+    for t in tickets:
+        db.refresh(t)
+
+    event = db.query(Event).filter(Event.id == tt.event_id).first()
+    _send_ticket_confirmation(
+        db, event, tickets, holder_name, holder_email,
+        user_id=user.id, guest_account_created=guest_created,
+    )
+
+    ip_address = meta_capi.client_ip(request)
+    user_agent = request.headers.get("user-agent", "")
+    event_source_url = f"{FRONTEND_URL}/buy"
+    if guest_created:
+        meta_capi.send_event(
+            "CompleteRegistration", event_source_url, ip_address=ip_address, user_agent=user_agent,
+            email=holder_email, event_id=f"register-{user.id}",
+        )
+    meta_capi.send_event(
+        "Purchase", event_source_url, ip_address=ip_address, user_agent=user_agent,
+        email=holder_email, event_id=f"purchase-{tickets[0].id}",
+        custom_data={"currency": "GBP", "value": 0},
+    )
+
+    result = _ticket_dict(tickets[0])
+    result["ticketIds"] = [t.id for t in tickets]
+    return result
 
 
 @router.get("/tickets/my")

@@ -1,0 +1,336 @@
+import json
+import os
+import secrets
+import logging
+from datetime import datetime
+import stripe
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from ..database import get_db
+from ..models import Event, TicketType, EventInterest, Ticket, TicketOrder, User
+from ..auth import get_current_user, get_or_create_guest_user, create_password_setup_link
+from ..email_service import send_email
+from ..ticket_pdf import generate_tickets_pdf
+from .. import meta_capi
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://rntech.live")
+MIN_CHARGE_PENCE = 30  # Stripe's minimum payable amount in GBP
+MAX_QUANTITY = 10  # per checkout — keeps a single buyer from wiping out a ticket type
+
+if STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
+
+
+class CheckoutIn(BaseModel):
+    ticketTypeId: str
+    holderName: str
+    holderEmail: str
+    inviteToken: str = ""
+    quantity: int = 1
+
+
+@router.post("/checkout/session")
+def create_checkout_session(data: CheckoutIn, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(503, "Payments aren't configured yet — please check back soon.")
+
+    tt = db.query(TicketType).filter(TicketType.id == data.ticketTypeId, TicketType.active == True).first()
+    if not tt:
+        raise HTTPException(404, "Ticket type not found")
+
+    event = db.query(Event).filter(Event.id == tt.event_id).first()
+    if not event:
+        raise HTTPException(404, "Event not found")
+
+    price = tt.effective_price
+    if price <= 0:
+        raise HTTPException(400, "This ticket type is free — use the free ticket flow instead")
+
+    discount_percent = 0
+    interest = None
+    quantity = data.quantity
+    if data.inviteToken:
+        interest = db.query(EventInterest).filter(EventInterest.invite_token == data.inviteToken).first()
+        if not interest:
+            raise HTTPException(404, "This invite link wasn't found")
+        if interest.status == "approved":
+            raise HTTPException(400, "This invite has already been used")
+        if interest.event_id != tt.event_id:
+            raise HTTPException(400, "This invite is for a different event")
+        discount_percent = interest.invite_discount_percent or 0
+        quantity = 1  # invite discounts are per-person, single ticket
+
+    if quantity < 1 or quantity > MAX_QUANTITY:
+        raise HTTPException(400, f"Quantity must be between 1 and {MAX_QUANTITY}")
+    if tt.sold_count + quantity > tt.capacity:
+        remaining = max(tt.capacity - tt.sold_count, 0)
+        raise HTTPException(400, f"Only {remaining} of this ticket type left")
+
+    discount_pence = (price * discount_percent) // 100
+    unit_total_pence = max(price - discount_pence, 0)
+    if unit_total_pence < MIN_CHARGE_PENCE:
+        raise HTTPException(400, "That discount takes the ticket below the minimum payable amount")
+    total_pence = unit_total_pence * quantity
+
+    holder_name = data.holderName.strip()
+    holder_email = data.holderEmail.strip().lower()
+    if not holder_name or not holder_email:
+        raise HTTPException(400, "Name and email are required")
+
+    guest_created = False
+    order_user_id = current_user.id if current_user else None
+    if not current_user:
+        guest_user, guest_created = get_or_create_guest_user(db, holder_name, holder_email)
+        order_user_id = guest_user.id
+
+    ip_address = meta_capi.client_ip(request)
+    user_agent = request.headers.get("user-agent", "")
+
+    order = TicketOrder(
+        event_id=event.id,
+        ticket_type_id=tt.id,
+        interest_id=interest.id if interest else None,
+        user_id=order_user_id,
+        holder_name=holder_name,
+        holder_email=holder_email,
+        quantity=quantity,
+        unit_price_pence=price,
+        discount_pence=discount_pence,
+        total_pence=total_pence,
+        status="pending",
+        guest_account_created=guest_created,
+        client_ip=ip_address,
+        client_user_agent=user_agent,
+    )
+    db.add(order)
+    db.flush()
+
+    event_source_url = f"{FRONTEND_URL}/buy"
+    meta_capi.send_event(
+        "InitiateCheckout", event_source_url, ip_address=ip_address, user_agent=user_agent,
+        email=holder_email, event_id=f"initiate-{order.id}",
+        custom_data={"currency": "GBP", "value": total_pence / 100},
+    )
+    if guest_created:
+        meta_capi.send_event(
+            "CompleteRegistration", event_source_url, ip_address=ip_address, user_agent=user_agent,
+            email=holder_email, event_id=f"register-{order_user_id}",
+        )
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=["card"],
+            customer_email=holder_email,
+            line_items=[{
+                "price_data": {
+                    "currency": "gbp",
+                    "product_data": {"name": f"{event.title} — {tt.name}"},
+                    "unit_amount": unit_total_pence,
+                },
+                "quantity": quantity,
+            }],
+            metadata={"order_id": order.id},
+            success_url=f"{FRONTEND_URL}/?checkout=success&order={order.id}",
+            cancel_url=f"{FRONTEND_URL}/?checkout=cancelled&order={order.id}",
+        )
+    except Exception as e:
+        db.rollback()
+        logger.exception("Stripe checkout session creation failed")
+        raise HTTPException(502, f"Could not start checkout: {e}")
+
+    order.stripe_session_id = session.id
+    db.commit()
+    return {"url": session.url, "orderId": order.id}
+
+
+@router.get("/checkout/order/{order_id}")
+def get_order_status(order_id: str, db: Session = Depends(get_db)):
+    o = db.query(TicketOrder).filter(TicketOrder.id == order_id).first()
+    if not o:
+        raise HTTPException(404, "Order not found")
+    result = {"status": o.status}
+    if o.status == "paid":
+        t = db.query(Ticket).filter(Ticket.order_id == o.id).first()
+        if t:
+            result["ticketId"] = t.id
+    return result
+
+
+@router.get("/invite/{token}")
+def get_invite(token: str, db: Session = Depends(get_db)):
+    i = db.query(EventInterest).filter(EventInterest.invite_token == token).first()
+    if not i:
+        raise HTTPException(404, "This invite link wasn't found")
+    event = db.query(Event).filter(Event.id == i.event_id).first()
+    if not event:
+        raise HTTPException(404, "Event not found")
+    if i.status == "approved":
+        return {"used": True, "event": {"title": event.title if event else ""}}
+
+    discount_percent = i.invite_discount_percent or 0
+    active_types = db.query(TicketType).filter(
+        TicketType.event_id == i.event_id, TicketType.active == True
+    ).all()
+    ticket_types = []
+    for tt in active_types:
+        price = tt.effective_price
+        if price <= 0:
+            continue  # free types don't need an invite — they issue instantly anyway
+        discounted = max(price - (price * discount_percent // 100), 0)
+        ticket_types.append({"id": tt.id, "name": tt.name, "price": price, "discountedPrice": discounted})
+
+    if not ticket_types:
+        raise HTTPException(400, "No paid ticket types are currently available for this event")
+
+    return {
+        "used": False,
+        "token": token,
+        "event": {
+            "id": event.id, "title": event.title, "displayDate": event.display_date,
+            "venue": event.venue, "location": event.location,
+            "posterImage": f"/uploads/{event.poster_image}" if event.poster_image else None,
+        },
+        "discountPercent": discount_percent,
+        "ticketTypes": ticket_types,
+        "holderName": i.name,
+        "holderEmail": i.email,
+    }
+
+
+def _fulfill_order(db: Session, order_id: str):
+    if not order_id:
+        return
+    order = db.query(TicketOrder).filter(TicketOrder.id == order_id).first()
+    if not order or order.status == "paid":
+        return  # already handled — keeps the webhook idempotent
+
+    quantity = order.quantity or 1
+    tt = db.query(TicketType).filter(TicketType.id == order.ticket_type_id).first()
+    if not tt or tt.sold_count + quantity > tt.capacity:
+        order.status = "failed_capacity"
+        db.commit()
+        return
+
+    tickets = []
+    for _ in range(quantity):
+        ticket = Ticket(
+            ticket_type_id=order.ticket_type_id,
+            event_id=order.event_id,
+            user_id=order.user_id,
+            holder_name=order.holder_name,
+            holder_email=order.holder_email,
+            qr_code=secrets.token_hex(6).upper(),
+            status="valid",
+            order_id=order.id,
+            amount_paid_pence=order.total_pence // quantity,
+        )
+        tt.sold_count += 1
+        db.add(ticket)
+        tickets.append(ticket)
+
+    order.status = "paid"
+    order.paid_at = datetime.utcnow()
+
+    if order.interest_id:
+        interest = db.query(EventInterest).filter(EventInterest.id == order.interest_id).first()
+        if interest:
+            interest.status = "approved"
+
+    db.commit()
+    for t in tickets:
+        db.refresh(t)
+
+    event = db.query(Event).filter(Event.id == order.event_id).first()
+    _send_ticket_confirmation(
+        db, event, tickets, order.holder_name, order.holder_email,
+        user_id=order.user_id, guest_account_created=order.guest_account_created,
+    )
+
+    meta_capi.send_event(
+        "Purchase", f"{FRONTEND_URL}/buy",
+        ip_address=order.client_ip or "", user_agent=order.client_user_agent or "",
+        email=order.holder_email, event_id=f"purchase-{order.id}",
+        custom_data={"currency": "GBP", "value": order.total_pence / 100},
+    )
+
+
+def _send_ticket_confirmation(
+    db: Session, event, tickets: list, holder_name: str, holder_email: str,
+    user_id: str = None, guest_account_created: bool = False,
+):
+    try:
+        ticket_type_names = {}
+        for t in tickets:
+            if t.ticket_type_id not in ticket_type_names:
+                tt = db.query(TicketType).filter(TicketType.id == t.ticket_type_id).first()
+                ticket_type_names[t.ticket_type_id] = tt.name if tt else "Ticket"
+
+        pdf_bytes = generate_tickets_pdf(tickets, event, ticket_type_names)
+        refs = ", ".join(t.id for t in tickets)
+        plural = "s" if len(tickets) > 1 else ""
+        event_title = event.title if event else "the event"
+
+        account_block = ""
+        if guest_account_created and user_id:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user:
+                setup_link = create_password_setup_link(db, user)
+                db.commit()
+                account_block = (
+                    f"<p>We've also set up a free RNTECH account for you using <b>{holder_email}</b>, "
+                    f"so your ticket{plural} {'are' if len(tickets) > 1 else 'is'} always there under "
+                    f"<b>My Tickets</b>. <a href=\"{setup_link}\">Set a password</a> whenever you'd like to log in.</p>"
+                )
+
+        send_email(
+            holder_email, holder_name,
+            f"Your ticket{plural} to {event_title}",
+            f"<p>Thanks for your purchase! Your {len(tickets)} ticket{plural} to <b>{event_title}</b> "
+            f"{'are' if len(tickets) > 1 else 'is'} attached to this email as a PDF — print it out or show it "
+            f"on your phone at the door.</p>"
+            f"<p>Ticket reference{plural}: <b>{refs}</b></p>"
+            f"{account_block}"
+            f"<p>If you're logged into your RNTECH account, you can also view your ticket{plural} anytime "
+            f"under <b>My Tickets</b> on the website.</p>",
+            attachments=[{
+                "filename": "rntech-tickets.pdf" if len(tickets) > 1 else f"rntech-ticket-{tickets[0].id}.pdf",
+                "content": pdf_bytes,
+            }],
+        )
+    except Exception:
+        logger.exception("Failed to send ticket confirmation email")
+
+
+@router.post("/webhooks/stripe")
+async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    if not STRIPE_WEBHOOK_SECRET:
+        # Refuse to process unsigned events rather than trust an unverified payload —
+        # anyone could otherwise POST a fake "paid" event and get a free ticket.
+        raise HTTPException(503, "Webhook signing secret not configured")
+
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    try:
+        # construct_event verifies the signature; we don't use its return value
+        # for data access since the SDK's response object type (and whether it
+        # behaves like a plain dict) varies across stripe-python versions.
+        stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except Exception:
+        raise HTTPException(400, "Invalid webhook payload")
+
+    event_dict = json.loads(payload)
+
+    if event_dict.get("type") == "checkout.session.completed":
+        session = event_dict.get("data", {}).get("object", {})
+        order_id = (session.get("metadata") or {}).get("order_id")
+        _fulfill_order(db, order_id)
+
+    return {"received": True}

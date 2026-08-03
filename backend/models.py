@@ -42,6 +42,8 @@ class Event(Base):
     location = Column(String)
     description = Column(Text, default="")
     poster_image = Column(String, nullable=True)   # path relative to /uploads/
+    ticket_banner_image = Column(String, nullable=True)  # banner shown on the ticket-buying modal, path relative to /uploads/
+    ticket_bio = Column(Text, nullable=True)             # short marketing blurb shown on the ticket-buying modal, supports **bold**
     lineup_json = Column(Text, default="[]")        # [{name, role}]
     giveaways_json = Column(Text, default="[]")
     status = Column(String, default="upcoming")     # upcoming | past

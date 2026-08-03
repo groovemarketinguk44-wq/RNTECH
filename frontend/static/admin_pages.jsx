@@ -108,9 +108,10 @@ function TabEvents() {
   const [events, setEvents] = useState([]);
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title:'',date:'',displayDate:'',startTime:'',endTime:'',venue:'',location:'',description:'',lineup:'',giveaways:'',status:'upcoming',isFree:true,featured:false,registrationMode:'open' });
+  const [form, setForm] = useState({ title:'',date:'',displayDate:'',startTime:'',endTime:'',venue:'',location:'',description:'',ticketBio:'',lineup:'',giveaways:'',status:'upcoming',isFree:true,featured:false,registrationMode:'open' });
   const [saving, setSaving] = useState(false);
   const [posterFile, setPosterFile] = useState(null);
+  const [ticketBannerFile, setTicketBannerFile] = useState(null);
   const [ticketTypes, setTicketTypes] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [ttForm, setTtForm] = useState({ name:'',pricePounds:'0',capacity:100,description:'',active:true,isTiered:false,tiers:[{capacity:100,pricePounds:'0'}] });
@@ -121,8 +122,9 @@ function TabEvents() {
 
   const openNew = () => {
     setEditing(null);
-    setForm({ title:'',date:'',displayDate:'',startTime:'',endTime:'',venue:'The White Swan',location:'St Albans, Hertfordshire',description:'',lineup:'',giveaways:'',status:'upcoming',isFree:true,featured:false,registrationMode:'open' });
+    setForm({ title:'',date:'',displayDate:'',startTime:'',endTime:'',venue:'The White Swan',location:'St Albans, Hertfordshire',description:'',ticketBio:'',lineup:'',giveaways:'',status:'upcoming',isFree:true,featured:false,registrationMode:'open' });
     setPosterFile(null);
+    setTicketBannerFile(null);
     setShowForm(true);
   };
 
@@ -132,12 +134,14 @@ function TabEvents() {
       title:ev.title, date:ev.date, displayDate:ev.displayDate,
       startTime:ev.startTime, endTime:ev.endTime||'', venue:ev.venue, location:ev.location,
       description:ev.description||'',
+      ticketBio:ev.ticketBio||'',
       lineup:(ev.lineup||[]).map(l=>l.name+(l.role?':'+l.role:'')).join('\n'),
       giveaways:(ev.giveaways||[]).join('\n'),
       status:ev.status, isFree:ev.isFree, featured:ev.featured,
       registrationMode:ev.registrationMode||'open',
     });
     setPosterFile(null);
+    setTicketBannerFile(null);
     setShowForm(true);
   };
 
@@ -155,6 +159,7 @@ function TabEvents() {
       if (editing) ev = await window.RNTECH_API.updateEvent(editing.id, payload);
       else ev = await window.RNTECH_API.createEvent(payload);
       if (posterFile) await window.RNTECH_API.uploadPoster(ev.id, posterFile);
+      if (ticketBannerFile) await window.RNTECH_API.uploadTicketBanner(ev.id, ticketBannerFile);
       setShowForm(false);
       load();
     } catch(err) { alert(err.message); }
@@ -257,6 +262,18 @@ function TabEvents() {
         React.createElement(AdminInput, { label:'Venue',value:form.venue,onChange:e=>setForm(f=>({...f,venue:e.target.value})) }),
         React.createElement(AdminInput, { label:'Location',value:form.location,onChange:e=>setForm(f=>({...f,location:e.target.value})) }),
         React.createElement(AdminTextarea, { label:'Description',value:form.description,onChange:e=>setForm(f=>({...f,description:e.target.value})),rows:3 }),
+        React.createElement(AdminTextarea, { label:'Ticket Bio (shown on the buy screen — use **text** for bold)',value:form.ticketBio,onChange:e=>setForm(f=>({...f,ticketBio:e.target.value})),rows:3,placeholder:"Back by popular demand. We're taking over **the rooftop of The White Swan** this coming Bank Holiday Sunday..." }),
+        React.createElement('div', { style:{marginBottom:14} },
+          React.createElement('label', { style:labelSt },'Ticket Banner Image (shown on the buy screen)'),
+          editing&&editing.ticketBannerImage&&React.createElement('div', { style:{display:'flex',alignItems:'center',gap:12,marginBottom:10} },
+            React.createElement('img', { src:editing.ticketBannerImage,alt:'Current ticket banner',style:{width:64,height:64,objectFit:'cover',borderRadius:4,border:'1px solid rgba(50,114,168,0.3)'} }),
+            React.createElement('div', null,
+              React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.5)',fontSize:12,marginBottom:6} },'Current banner'),
+              React.createElement('button', { type:'button',onClick:async()=>{ if(!confirm('Remove ticket banner image?')) return; await window.RNTECH_API.removeTicketBanner(editing.id); setEditing(ev=>({...ev,ticketBannerImage:null})); },style:{...FS,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} },'Remove Image')
+            )
+          ),
+          React.createElement('input', { type:'file',accept:'image/*',onChange:e=>setTicketBannerFile(e.target.files[0]),style:{...FS,color:'rgba(255,255,255,0.6)',fontSize:13} })
+        ),
         React.createElement(AdminTextarea, { label:'Lineup (one per line: NAME:Role)',value:form.lineup,onChange:e=>setForm(f=>({...f,lineup:e.target.value})),rows:4,placeholder:'DJ MIDDO:Headliner\nBEN HENDERSON:Headliner\nDJ DAGZ:Support' }),
         React.createElement(AdminTextarea, { label:'Giveaways (one per line)',value:form.giveaways,onChange:e=>setForm(f=>({...f,giveaways:e.target.value})),rows:3,placeholder:'Free entry all night\nBrewtini sampling' }),
         React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14} },

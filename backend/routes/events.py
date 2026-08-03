@@ -36,6 +36,8 @@ def _event_dict(e: Event) -> dict:
         "venue": e.venue, "location": e.location,
         "description": e.description,
         "posterImage": f"/uploads/{e.poster_image}" if e.poster_image else None,
+        "ticketBannerImage": f"/uploads/{e.ticket_banner_image}" if e.ticket_banner_image else None,
+        "ticketBio": e.ticket_bio or "",
         "lineup": e.lineup, "giveaways": e.giveaways,
         "status": e.status, "isFree": e.is_free, "featured": e.featured,
         "registrationMode": e.registration_mode or "open",
@@ -70,6 +72,7 @@ class EventIn(BaseModel):
     venue: str = ""
     location: str = ""
     description: str = ""
+    ticketBio: str = ""
     lineup: List[dict] = []
     giveaways: List[str] = []
     status: str = "upcoming"
@@ -92,6 +95,7 @@ def create_event(data: EventIn, db: Session = Depends(get_db), _=Depends(require
         venue=data.venue,
         location=data.location,
         description=data.description,
+        ticket_bio=data.ticketBio,
         lineup_json=json.dumps(data.lineup),
         giveaways_json=json.dumps(data.giveaways),
         status=data.status,
@@ -118,6 +122,7 @@ def update_event(event_id: str, data: EventIn, db: Session = Depends(get_db), _=
     e.venue = data.venue
     e.location = data.location
     e.description = data.description
+    e.ticket_bio = data.ticketBio
     e.lineup_json = json.dumps(data.lineup)
     e.giveaways_json = json.dumps(data.giveaways)
     e.status = data.status
@@ -165,6 +170,36 @@ def remove_poster(event_id: str, db: Session = Depends(get_db), _=Depends(requir
         if poster_path.exists():
             poster_path.unlink(missing_ok=True)
         e.poster_image = None
+        db.commit()
+
+
+@router.post("/admin/events/{event_id}/ticket-banner")
+async def upload_ticket_banner(event_id: str, file: UploadFile = File(...),
+                        db: Session = Depends(get_db), _=Depends(require_admin)):
+    e = db.query(Event).filter(Event.id == event_id).first()
+    if not e:
+        raise HTTPException(404, "Event not found")
+    ext = Path(file.filename).suffix.lower() if file.filename else ".jpg"
+    filename = f"ticket-banner-{event_id}{ext}"
+    dest = UPLOAD_DIR / "images"
+    dest.mkdir(parents=True, exist_ok=True)
+    with open(dest / filename, "wb") as f:
+        f.write(await file.read())
+    e.ticket_banner_image = f"images/{filename}"
+    db.commit()
+    return {"ticketBannerImage": f"/uploads/images/{filename}"}
+
+
+@router.delete("/admin/events/{event_id}/ticket-banner", status_code=204)
+def remove_ticket_banner(event_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    e = db.query(Event).filter(Event.id == event_id).first()
+    if not e:
+        raise HTTPException(404, "Event not found")
+    if e.ticket_banner_image:
+        banner_path = UPLOAD_DIR / e.ticket_banner_image
+        if banner_path.exists():
+            banner_path.unlink(missing_ok=True)
+        e.ticket_banner_image = None
         db.commit()
 
 

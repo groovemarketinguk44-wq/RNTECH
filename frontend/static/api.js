@@ -58,6 +58,11 @@ window.RNTECH_API = (function () {
       return postForm('/admin/events/' + eventId + '/poster', fd);
     },
     removePoster: (eventId) => del('/admin/events/' + eventId + '/poster'),
+    uploadTicketBanner: (eventId, file) => {
+      const fd = new FormData(); fd.append('file', file);
+      return postForm('/admin/events/' + eventId + '/ticket-banner', fd);
+    },
+    removeTicketBanner: (eventId) => del('/admin/events/' + eventId + '/ticket-banner'),
 
     // Ticket types
     createTicketType: (data) => post('/admin/ticket-types', data),

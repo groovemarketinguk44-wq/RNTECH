@@ -77,6 +77,8 @@ async def lifespan(app: FastAPI):
         _migrate("ticket_orders",   "guest_account_created", "INTEGER DEFAULT 0")
         _migrate("ticket_orders",   "client_ip",            "TEXT")
         _migrate("ticket_orders",   "client_user_agent",    "TEXT")
+        _migrate("events",          "ticket_banner_image", "TEXT")
+        _migrate("events",          "ticket_bio",          "TEXT")
     # Ensure upload dirs exist
     for sub in ("images", "videos"):
         (UPLOAD_DIR / sub).mkdir(parents=True, exist_ok=True)

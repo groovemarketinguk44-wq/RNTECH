@@ -119,8 +119,7 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
   }, []);
 
   const openTicketModal = (event) => {
-    const types = (event.ticketTypes||[]).filter(t=>t.active);
-    setSelectedType(types[0]||null);
+    setSelectedType(null);
     setQuantity(1);
     setTicketEvent(event);
     setHolderName(user ? user.name : '');
@@ -283,14 +282,14 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
         React.createElement('div',{className:'modal-handle'}),
         React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:16,color:'#fff',margin:'0 0 3px',textTransform:'uppercase' } },'Get Tickets'),
         React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:10,marginBottom:8 } }, ticketEvent.title+' · '+ticketEvent.displayDate),
-        ticketEvent.ticketBannerImage&&React.createElement('img', { src:ticketEvent.ticketBannerImage, alt:ticketEvent.title, style:{ width:'100%',height:85,objectFit:'cover',objectPosition:'center top',display:'block',marginBottom:8 } }),
+        ticketEvent.ticketBannerImage&&React.createElement('img', { src:ticketEvent.ticketBannerImage, alt:ticketEvent.title, style:{ width:'100%',height:85,objectFit:'cover',objectPosition:'center 25%',display:'block',marginBottom:8 } }),
         ticketEvent.ticketBio&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.6)',fontSize:10.5,lineHeight:1.4,marginBottom:10 } }, renderBio(ticketEvent.ticketBio)),
         React.createElement('div', { style:{ display:'flex',flexDirection:'column',gap:5,marginBottom:10 } },
           (ticketEvent.ticketTypes||[]).filter(t=>t.active).map(t=>{
             const isSel = selectedType&&selectedType.id===t.id;
             const remaining = Math.max((t.capacity||0)-(t.soldCount||0), 0);
             const maxQty = Math.max(Math.min(10, remaining), 1);
-            return React.createElement('div', { key:t.id, onClick:()=>{ if(!isSel){ setSelectedType(t); setQuantity(1); } }, style:{ background:isSel?'rgba(50,114,168,0.15)':'rgba(255,255,255,0.03)',border:`1px solid ${isSel?'rgba(50,114,168,0.5)':'rgba(255,255,255,0.1)'}`,borderRadius:0,padding:'8px 10px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center' } },
+            return React.createElement('div', { key:t.id, onClick:()=>{ if(isSel){ setSelectedType(null); } else { setSelectedType(t); setQuantity(1); } }, style:{ background:isSel?'rgba(50,114,168,0.15)':'rgba(255,255,255,0.03)',border:`1px solid ${isSel?'rgba(50,114,168,0.5)':'rgba(255,255,255,0.1)'}`,borderRadius:0,padding:'8px 10px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center' } },
               React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,color:'#fff' } }, t.name),
               isSel
                 ? React.createElement('div', { onClick:e=>e.stopPropagation(), style:{ display:'flex',alignItems:'center',gap:8,border:'1px solid rgba(255,255,255,0.2)',padding:'2px 8px' } },

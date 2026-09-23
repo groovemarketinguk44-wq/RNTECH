@@ -22,6 +22,7 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     role = Column(String, default="user")  # "user" | "admin"
     subscribed = Column(Boolean, default=True)
+    unsubscribed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     tickets = relationship("Ticket", back_populates="user", cascade="all, delete-orphan")
@@ -74,6 +75,8 @@ class TicketType(Base):
     capacity = Column(Integer, default=100)
     sold_count = Column(Integer, default=0)
     active = Column(Boolean, default=True)
+    sold_out = Column(Boolean, default=False)  # manual admin override, independent of capacity/sold_count
+    nearly_gone = Column(Boolean, default=False)  # manual admin flag: shows a "Nearly Gone" label on the buy screen
     description = Column(Text, default="")
     is_tiered = Column(Boolean, default=False)
     tiers_json = Column(Text, default="[]")  # [{capacity, price_pence}]
@@ -153,6 +156,7 @@ class TicketOrder(Base):
     stripe_session_id = Column(String, unique=True, nullable=True, index=True)
     status = Column(String, default="pending")  # pending | paid | failed_capacity | cancelled
     guest_account_created = Column(Boolean, default=False)
+    offer_id = Column(String, nullable=True)   # PersonalOffer this order redeemed, if any
     client_ip = Column(String, nullable=True)
     client_user_agent = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -215,6 +219,30 @@ class EmailCampaign(Base):
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Throttled broadcast campaigns (audience != "drip"): queued on Start, then trickled out one email at a time.
+    audience = Column(String, default="drip")            # drip | event_attended | event_no_show | event_buyers | everyone_else | all_subscribers
+    # Optional personal discount: every recipient gets their own single-use link (see PersonalOffer).
+    offer_event_id = Column(String, nullable=True)       # event the discount applies to
+    offer_discount_bp = Column(Integer, default=0)       # basis points off: 3333 = 1/3 off, 0 = no offer
+    offer_max_tickets = Column(Integer, default=4)       # most tickets one link can buy
+    offer_expires_at = Column(DateTime, nullable=True)   # optional hard expiry (UTC); links also die when the event starts
+    round_name = Column(String, default="default")       # campaigns in one round never email the same person and run one after another
+    queue_position = Column(Integer, default=0)          # send order inside a round once queued
+    start_at = Column(DateTime, nullable=True)           # queued campaign won't begin before this (UTC)
+    audience_event_id = Column(String, nullable=True)    # event whose ticket buyers are emailed (event_buyers)
+    send_status = Column(String, default="draft")        # draft | running | paused | completed
+    gap_minutes = Column(Integer, default=20)            # average gap between two emails (jittered ±25%)
+    daily_cap = Column(Integer, default=30)              # max emails per London day
+    window_start_hour = Column(Integer, default=9)       # only send between these London hours
+    window_end_hour = Column(Integer, default=21)
+    next_send_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    last_success_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+    last_error_at = Column(DateTime, nullable=True)
+    consecutive_failures = Column(Integer, default=0)
+    pause_reason = Column(Text, nullable=True)
+
     sends = relationship("EmailSend", back_populates="campaign", cascade="all, delete-orphan")
 
 
@@ -235,7 +263,13 @@ class EmailSend(Base):
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
     scheduled_for = Column(DateTime)
     sent_at = Column(DateTime, nullable=True)
-    status = Column(String, default="pending")   # pending | sent | failed
+    status = Column(String, default="pending")   # pending | sent | failed | skipped
+    to_email = Column(String, nullable=True)     # snapshot of the address used, for bounce matching
+    attempts = Column(Integer, default=0)
+    error = Column(Text, nullable=True)
+    opened_at = Column(DateTime, nullable=True)
+    open_count = Column(Integer, default=0)
+    bounced_at = Column(DateTime, nullable=True)
 
     campaign = relationship("EmailCampaign", back_populates="sends")
     user = relationship("User", back_populates="email_sends")
@@ -246,3 +280,29 @@ class SiteSettings(Base):
 
     key = Column(String, primary_key=True)
     value = Column(Text, default="")
+
+
+class PersonalOffer(Base):
+    """A discount link that belongs to exactly one person and can be redeemed exactly once.
+
+    The token is the only secret. Everything else (who the tickets go to, the price) is fixed server-side
+    from this row, so nothing the buyer's browser sends can change who benefits or by how much.
+    """
+    __tablename__ = "personal_offers"
+
+    id = Column(String, primary_key=True, default=lambda: _uid("off-"))
+    token = Column(String, unique=True, nullable=False, index=True)
+    campaign_id = Column(String, ForeignKey("email_campaigns.id", ondelete="CASCADE"), index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    event_id = Column(String, ForeignKey("events.id", ondelete="CASCADE"))
+    discount_bp = Column(Integer, default=0)
+    max_tickets = Column(Integer, default=4)
+    expires_at = Column(DateTime, nullable=True)
+    status = Column(String, default="unused")   # unused | used | revoked
+    created_at = Column(DateTime, default=datetime.utcnow)
+    used_at = Column(DateTime, nullable=True)
+    used_order_id = Column(String, nullable=True)
+    reserved_order_id = Column(String, nullable=True)   # the one checkout currently in progress
+    reserved_until = Column(DateTime, nullable=True)
+
+    user = relationship("User")

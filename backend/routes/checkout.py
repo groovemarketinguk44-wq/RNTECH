@@ -2,17 +2,20 @@ import json
 import os
 import secrets
 import logging
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..database import get_db
-from ..models import Event, TicketType, EventInterest, Ticket, TicketOrder, User
+from ..models import Event, TicketType, EventInterest, Ticket, TicketOrder, User, PersonalOffer
+from .offers import offer_problem, discounted_price, discount_label, PROBLEM_TEXT
 from ..auth import get_current_user, get_or_create_guest_user, ensure_guest_email_available, create_password_setup_link
 from ..email_service import send_email
 from ..ticket_pdf import generate_tickets_pdf
 from .. import meta_capi
+from .. import onesignal_notify
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -29,9 +32,10 @@ if STRIPE_SECRET_KEY:
 
 class CheckoutIn(BaseModel):
     ticketTypeId: str
-    holderName: str
-    holderEmail: str
+    holderName: str = ""
+    holderEmail: str = ""
     inviteToken: str = ""
+    offerToken: str = ""   # personal discount link — see _create_offer_checkout
     quantity: int = 1
 
 
@@ -39,10 +43,14 @@ class CheckoutIn(BaseModel):
 def create_checkout_session(data: CheckoutIn, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     if not STRIPE_SECRET_KEY:
         raise HTTPException(503, "Payments aren't configured yet — please check back soon.")
+    if data.offerToken:
+        return _create_offer_checkout(data, request, db, current_user)
 
     tt = db.query(TicketType).filter(TicketType.id == data.ticketTypeId, TicketType.active == True).first()
     if not tt:
         raise HTTPException(404, "Ticket type not found")
+    if tt.sold_out:
+        raise HTTPException(400, "This ticket type is sold out")
 
     event = db.query(Event).filter(Event.id == tt.event_id).first()
     if not event:
@@ -64,7 +72,6 @@ def create_checkout_session(data: CheckoutIn, request: Request, db: Session = De
         if interest.event_id != tt.event_id:
             raise HTTPException(400, "This invite is for a different event")
         discount_percent = interest.invite_discount_percent or 0
-        quantity = 1  # invite discounts are per-person, single ticket
 
     if quantity < 1 or quantity > MAX_QUANTITY:
         raise HTTPException(400, f"Quantity must be between 1 and {MAX_QUANTITY}")
@@ -151,6 +158,125 @@ def create_checkout_session(data: CheckoutIn, request: Request, db: Session = De
     return {"url": session.url, "orderId": order.id}
 
 
+OFFER_RESERVATION_MINUTES = 31   # Stripe's minimum checkout-session lifetime is 30 min
+
+
+def _create_offer_checkout(data: CheckoutIn, request: Request, db: Session, current_user):
+    """Checkout for a personal discount link. Deliberately ignores any name/email/price the browser sends:
+
+    - tickets always go to the account the link was issued to (name and email come from that account),
+    - the discount is computed here from the link, never trusted from the request,
+    - the link works for one purchase only and only one checkout can be live at a time.
+    """
+    now = datetime.utcnow()
+    offer = db.query(PersonalOffer).filter(PersonalOffer.token == data.offerToken).first()
+    if not offer:
+        raise HTTPException(404, "This link isn't valid.")
+    problem = offer_problem(db, offer, now)
+    if problem:
+        raise HTTPException(400, PROBLEM_TEXT[problem])
+    if current_user and current_user.id != offer.user_id:
+        raise HTTPException(403, "This offer is personal to someone else's account.")
+
+    owner = db.query(User).filter(User.id == offer.user_id).first()
+    if not owner:
+        raise HTTPException(400, PROBLEM_TEXT["revoked"])
+
+    tt = db.query(TicketType).filter(TicketType.id == data.ticketTypeId, TicketType.active == True).first()
+    if not tt or tt.event_id != offer.event_id:
+        raise HTTPException(400, "That ticket isn't part of this offer")
+    if tt.sold_out:
+        raise HTTPException(400, "This ticket type is sold out")
+    event = db.query(Event).filter(Event.id == tt.event_id).first()
+    if not event:
+        raise HTTPException(404, "Event not found")
+
+    quantity = data.quantity
+    limit = min(offer.max_tickets or 1, MAX_QUANTITY)
+    if quantity < 1 or quantity > limit:
+        raise HTTPException(400, f"You can buy between 1 and {limit} tickets with this offer")
+    if tt.sold_count + quantity > tt.capacity:
+        remaining = max(tt.capacity - tt.sold_count, 0)
+        raise HTTPException(400, f"Only {remaining} of this ticket type left")
+
+    price = tt.effective_price
+    if price <= 0:
+        raise HTTPException(400, "This ticket type is free — no offer needed")
+    unit_total_pence = discounted_price(price, offer.discount_bp)
+    if unit_total_pence < MIN_CHARGE_PENCE:
+        raise HTTPException(400, "That discount takes the ticket below the minimum payable amount")
+    total_pence = unit_total_pence * quantity
+
+    # One live checkout at a time: a second attempt supersedes the first (so a genuine retry isn't locked
+    # out) but the first can no longer be paid — and if it already was, the link is spent.
+    if offer.reserved_order_id and offer.reserved_until and offer.reserved_until > now:
+        old = db.query(TicketOrder).filter(TicketOrder.id == offer.reserved_order_id).first()
+        if old and old.status == "paid":
+            raise HTTPException(400, PROBLEM_TEXT["used"])
+        if old and old.stripe_session_id:
+            try:
+                stripe.checkout.Session.expire(old.stripe_session_id)
+            except Exception:
+                try:
+                    if stripe.checkout.Session.retrieve(old.stripe_session_id).status == "complete":
+                        raise HTTPException(409, "A payment for this offer is already going through — check your email in a moment.")
+                except HTTPException:
+                    raise
+                except Exception:
+                    logger.exception("Could not verify the superseded checkout session")
+                    raise HTTPException(503, "Couldn't safely restart checkout — please try again in a minute.")
+        if old:
+            old.status = "cancelled"
+
+    ip_address = meta_capi.client_ip(request)
+    user_agent = request.headers.get("user-agent", "")
+    order = TicketOrder(
+        event_id=event.id, ticket_type_id=tt.id, user_id=owner.id,
+        holder_name=owner.name, holder_email=owner.email,
+        quantity=quantity, unit_price_pence=price, discount_pence=price - unit_total_pence,
+        total_pence=total_pence, status="pending", guest_account_created=False,
+        offer_id=offer.id, client_ip=ip_address, client_user_agent=user_agent,
+    )
+    db.add(order)
+    db.flush()
+
+    meta_capi.send_event(
+        "InitiateCheckout", f"{FRONTEND_URL}/buy", ip_address=ip_address, user_agent=user_agent,
+        email=owner.email, event_id=f"initiate-{order.id}",
+        custom_data={"currency": "GBP", "value": total_pence / 100},
+    )
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=["card"],
+            customer_email=owner.email,
+            line_items=[{
+                "price_data": {
+                    "currency": "gbp",
+                    "product_data": {"name": f"{event.title} — {tt.name}",
+                                     "description": f"Personal offer: {discount_label(offer.discount_bp)}"},
+                    "unit_amount": unit_total_pence,
+                },
+                "quantity": quantity,
+            }],
+            metadata={"order_id": order.id, "offer_id": offer.id},
+            expires_at=int(time.time()) + OFFER_RESERVATION_MINUTES * 60,
+            success_url=f"{FRONTEND_URL}/?checkout=success&order={order.id}",
+            cancel_url=f"{FRONTEND_URL}/?checkout=cancelled&order={order.id}",
+        )
+    except Exception as e:
+        db.rollback()
+        logger.exception("Stripe checkout session creation failed (offer)")
+        raise HTTPException(502, f"Could not start checkout: {e}")
+
+    order.stripe_session_id = session.id
+    offer.reserved_order_id = order.id
+    offer.reserved_until = now + timedelta(minutes=OFFER_RESERVATION_MINUTES)
+    db.commit()
+    return {"url": session.url, "orderId": order.id}
+
+
 @router.get("/checkout/order/{order_id}")
 def get_order_status(order_id: str, db: Session = Depends(get_db)):
     o = db.query(TicketOrder).filter(TicketOrder.id == order_id).first()
@@ -181,11 +307,16 @@ def get_invite(token: str, db: Session = Depends(get_db)):
     ).all()
     ticket_types = []
     for tt in active_types:
+        if tt.sold_out:
+            continue
         price = tt.effective_price
         if price <= 0:
             continue  # free types don't need an invite — they issue instantly anyway
+        remaining = max(tt.capacity - tt.sold_count, 0)
+        if remaining <= 0:
+            continue
         discounted = max(price - (price * discount_percent // 100), 0)
-        ticket_types.append({"id": tt.id, "name": tt.name, "price": price, "discountedPrice": discounted})
+        ticket_types.append({"id": tt.id, "name": tt.name, "price": price, "discountedPrice": discounted, "remaining": remaining})
 
     if not ticket_types:
         raise HTTPException(400, "No paid ticket types are currently available for this event")
@@ -239,6 +370,13 @@ def _fulfill_order(db: Session, order_id: str):
     order.status = "paid"
     order.paid_at = datetime.utcnow()
 
+    if order.offer_id:
+        offer = db.query(PersonalOffer).filter(PersonalOffer.id == order.offer_id).first()
+        if offer:
+            offer.status = "used"
+            offer.used_at = order.paid_at
+            offer.used_order_id = order.id
+
     if order.interest_id:
         interest = db.query(EventInterest).filter(EventInterest.id == order.interest_id).first()
         if interest:
@@ -252,6 +390,13 @@ def _fulfill_order(db: Session, order_id: str):
     _send_ticket_confirmation(
         db, event, tickets, order.holder_name, order.holder_email,
         user_id=order.user_id, guest_account_created=order.guest_account_created,
+    )
+
+    onesignal_notify.notify_ticket_sale(
+        quantity=order.quantity,
+        event_title=event.title if event else "an event",
+        buyer_name=order.holder_name,
+        total_pence=order.total_pence,
     )
 
     meta_capi.send_event(

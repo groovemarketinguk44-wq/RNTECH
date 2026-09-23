@@ -43,6 +43,11 @@ with engine.connect() as _conn:
     _add_col("event_interests", "last_name",         "TEXT")
     _add_col("event_interests", "instagram",         "TEXT")
     _add_col("event_interests", "user_id",           "TEXT")
+    # seed.py queries these tables through the ORM before the app's own startup migration runs,
+    # so any column added to a model that seed touches must exist here too or the container crash-loops.
+    _add_col("users",           "unsubscribed_at",   "DATETIME")
+    _add_col("ticket_types",    "sold_out",          "INTEGER DEFAULT 0")
+    _add_col("ticket_types",    "nearly_gone",       "INTEGER DEFAULT 0")
 
 db = SessionLocal()
 

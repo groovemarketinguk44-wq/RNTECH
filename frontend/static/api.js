@@ -34,6 +34,7 @@ window.RNTECH_API = (function () {
   const get = (p) => req('GET', p);
   const post = (p, b) => req('POST', p, b);
   const put = (p, b) => req('PUT', p, b);
+  const patch = (p, b) => req('PATCH', p, b);
   const del = (p) => req('DELETE', p);
   const postForm = (p, b) => req('POST', p, b, true);
 
@@ -68,15 +69,16 @@ window.RNTECH_API = (function () {
     createTicketType: (data) => post('/admin/ticket-types', data),
     updateTicketType: (id, data) => put('/admin/ticket-types/' + id, data),
     deleteTicketType: (id) => del('/admin/ticket-types/' + id),
+    setTicketTypeSoldOut: (id, soldOut) => patch('/admin/ticket-types/' + id + '/sold-out', { soldOut }),
 
     // Event interest / waitlist
     myInterests: () => get('/events/interests/my'),
     submitInterest: (eventId, data) => post('/events/' + eventId + '/interest', data),
     adminGetInterest: (eventId) => get('/admin/interest/' + eventId),
     approveInterest: (id) => put('/admin/interest/' + id + '/approve', {}),
-    inviteInterest: (id, discountPercent) => put('/admin/interest/' + id + '/invite', { discountPercent }),
-    bulkInviteInterest: (interestIds, eventId, discountPercent) => post('/admin/interest/bulk-invite', { interestIds, eventId, discountPercent }),
-    inviteAllAttendees: (eventId, discountPercent) => post('/admin/events/' + eventId + '/invite-attendees', { discountPercent }),
+    inviteInterest: (id, discountPercent, subject, message) => put('/admin/interest/' + id + '/invite', { discountPercent, subject, message }),
+    bulkInviteInterest: (interestIds, eventId, discountPercent, subject, message) => post('/admin/interest/bulk-invite', { interestIds, eventId, discountPercent, subject, message }),
+    inviteAllAttendees: (eventId, discountPercent, subject, message) => post('/admin/events/' + eventId + '/invite-attendees', { discountPercent, subject, message }),
     rejectInterest: (id) => put('/admin/interest/' + id + '/reject', {}),
     deleteInterest: (id) => del('/admin/interest/' + id),
 
@@ -84,12 +86,14 @@ window.RNTECH_API = (function () {
     createCheckoutSession: (data) => post('/checkout/session', data),
     getOrderStatus: (orderId) => get('/checkout/order/' + orderId),
     getInvite: (token) => get('/invite/' + token),
+    getOffer: (token) => get('/offer/' + token),
 
     // Tickets
     issueTicket: (data) => post('/tickets', data),
     myTickets: () => get('/tickets/my'),
     adminTickets: (eventId) => get('/admin/tickets' + (eventId ? '?event_id=' + eventId : '')),
     adminIssueTicket: (data) => post('/admin/tickets', data),
+    adminIssueCashTickets: (data) => post('/admin/tickets/cash', data),
     searchTickets: (q, eventId) => get('/admin/tickets/search?q=' + encodeURIComponent(q) + (eventId ? '&event_id=' + eventId : '')),
     checkinByQR: (qrCode) => post('/admin/tickets/checkin/' + encodeURIComponent(qrCode), {}),
     exportTickets: (eventId) => BASE + '/admin/tickets/export' + (eventId ? '?event_id=' + eventId : '') + '&_auth=' + (token() || ''),
@@ -142,6 +146,11 @@ window.RNTECH_API = (function () {
 
     // Admin
     getStats: () => get('/admin/stats'),
+    getPaymentsOverview: (days, eventId) => get('/admin/payments/overview?days=' + (days || 30) + (eventId ? '&event_id=' + encodeURIComponent(eventId) : '')),
+    getMetaAdsOverview: (days, eventId) => get('/admin/meta-ads/overview?days=' + (days || 30) + (eventId ? '&event_id=' + encodeURIComponent(eventId) : '')),
+    updateAdsRange: (eventId, since, until) => put('/admin/ads-range', { eventId, since: since || null, until: until || null }),
+    updateDjSpend: (pence, eventId) => put('/admin/dj-spend', { pence, eventId: eventId || null }),
+    addCashRevenue: (pence, eventId) => post('/admin/cash-revenue', { pence, eventId: eventId || null }),
     getAttendees: () => get('/admin/attendees'),
     exportAttendees: () => BASE + '/admin/attendees/export?_auth=' + (token() || ''),
     unsubscribeUser: (id) => put('/admin/users/' + id + '/unsubscribe', {}),
@@ -153,6 +162,17 @@ window.RNTECH_API = (function () {
     createCampaign: (data) => post('/admin/campaigns', data),
     updateCampaign: (id, data) => put('/admin/campaigns/' + id, data),
     deleteCampaign: (id) => del('/admin/campaigns/' + id),
-    blastCampaign: (id) => post('/admin/campaigns/' + id + '/blast', {}),
+    getEmailDashboard: () => get('/admin/email-dashboard'),
+    previewCampaign: (id) => get('/admin/campaigns/' + id + '/preview'),
+    testCampaign: (id, to) => post('/admin/campaigns/' + id + '/test', { to: to || null }),
+    campaignRecipients: (id) => get('/admin/campaigns/' + id + '/recipients'),
+    startCampaign: (id) => post('/admin/campaigns/' + id + '/start', {}),
+    pauseCampaign: (id) => post('/admin/campaigns/' + id + '/pause', {}),
+    resumeCampaign: (id) => post('/admin/campaigns/' + id + '/resume', {}),
+    retryFailedSends: (id) => post('/admin/campaigns/' + id + '/retry-failed', {}),
+    getRoundPlan: (round) => get('/admin/rounds/plan?round=' + encodeURIComponent(round)),
+    queueRound: (round, startAt) => post('/admin/rounds/queue', { round, startAt: startAt || null }),
+    queueCampaign: (id, startAt) => post('/admin/campaigns/' + id + '/queue', { startAt: startAt || null }),
+    unqueueCampaign: (id) => post('/admin/campaigns/' + id + '/unqueue', {}),
   };
 })();

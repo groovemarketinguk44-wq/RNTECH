@@ -1,6 +1,6 @@
 // Shared UI Components — pixel-perfect from design
 // Exports: StarField, MiniPlayer, AuthModal, GlowButton, Chip, SectionHeader,
-//          FuturisticCard, EventCard, MixCard, TicketCard, VideoModal, Spinner
+//          FuturisticCard, EventCard, MixCard, TicketCard, TicketGroup, VideoModal, Spinner
 
 var { useState, useEffect, useRef, useCallback } = React;
 
@@ -122,42 +122,61 @@ function StarField() {
 }
 
 /* ─── Futuristic Card ────────────────────────────────────────────── */
+// Glassmorphic card: frosted, translucent, rounded — replaces the old sci-fi HUD-bracket
+// rectangle. The blur/tint/overflow-clip lives on a decorative layer that is a SIBLING of
+// `children`, not an ancestor of it: TicketCard nests a position:fixed full-screen QR
+// modal inside `children`, and backdrop-filter/overflow:hidden on any ancestor of that
+// modal would contain or clip it to the card instead of the viewport. Keeping that layer
+// out of the children's ancestor chain sidesteps the whole class of bug regardless of
+// which browser quirks are in play. Same reasoning applies to `transform` on the outer
+// wrapper below — it only ever moves for cards with onClick (TicketCard has none), so it
+// never becomes a containing block for that modal either.
 function FuturisticCard({ children, active=false, onClick, style={} }) {
   const [hovered, setHovered] = useState(false);
   const hot = hovered || active;
-  const bc = active ? 'rgba(50,114,168,0.9)' : hot ? 'rgba(50,114,168,0.6)' : 'rgba(50,114,168,0.25)';
-  const brkt = active ? '#3272a8' : hot ? '#5a92c0' : 'rgba(50,114,168,0.5)';
-  return React.createElement('div', { onMouseEnter:()=>setHovered(true), onMouseLeave:()=>setHovered(false), onClick, style:{ position:'relative', cursor:onClick?'pointer':'default', transition:'transform 0.2s,box-shadow 0.2s', transform:hot&&onClick?'translateY(-2px)':'none', boxShadow:active?'0 0 24px rgba(50,114,168,0.35),inset 0 0 30px rgba(50,114,168,0.06)':hot?'0 0 16px rgba(50,114,168,0.2)':'none', ...style }},
-    React.createElement('div', { style:{ position:'relative', background:hot?'rgba(5,18,44,0.93)':'rgba(3,11,28,0.88)', border:'1px solid '+bc, backdropFilter:'blur(14px)', padding:'22px 24px', transition:'background 0.2s,border-color 0.2s' }},
-      React.createElement('div', { style:{ position:'absolute',inset:0,zIndex:0,pointerEvents:'none', backgroundImage:'repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(50,114,168,0.018) 3px,rgba(50,114,168,0.018) 4px)', opacity:hot?1:0.5,transition:'opacity 0.2s' }}),
-      React.createElement('div', { style:{ position:'absolute',top:0,left:0,right:0,height:1,zIndex:2, background:active?'linear-gradient(90deg,#3272a8,rgba(50,114,168,0.3),transparent)':hot?'linear-gradient(90deg,rgba(50,114,168,0.8),rgba(50,114,168,0.2),transparent)':'linear-gradient(90deg,rgba(50,114,168,0.4),transparent)', transition:'background 0.2s' }}),
-      React.createElement('div', { style:{ position:'absolute',bottom:0,left:0,right:0,height:1,zIndex:2, background:'linear-gradient(90deg,transparent,rgba(50,114,168,0.15),transparent)' }}),
-      React.createElement('div', { style:{ position:'absolute',top:6,left:6,zIndex:3,width:12,height:12, borderTop:'1.5px solid '+brkt,borderLeft:'1.5px solid '+brkt, transition:'border-color 0.2s' }}),
-      React.createElement('div', { style:{ position:'absolute',top:6,right:6,zIndex:3,width:12,height:12, borderTop:'1.5px solid '+brkt,borderRight:'1.5px solid '+brkt, transition:'border-color 0.2s' }}),
-      React.createElement('div', { style:{ position:'absolute',bottom:6,left:6,zIndex:3,width:12,height:12, borderBottom:'1.5px solid '+brkt,borderLeft:'1.5px solid '+brkt, transition:'border-color 0.2s' }}),
-      React.createElement('div', { style:{ position:'absolute',bottom:6,right:6,zIndex:3,width:12,height:12, borderBottom:'1.5px solid '+brkt,borderRight:'1.5px solid '+brkt, transition:'border-color 0.2s' }}),
-      React.createElement('div', { style:{ position:'relative',zIndex:1 }}, children)
-    )
+  const ease = 'cubic-bezier(0.16,1,0.3,1)';
+  const borderColor = active ? 'rgba(50,114,168,0.6)' : hot ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.10)';
+  const glassBg = active
+    ? 'linear-gradient(160deg, rgba(50,114,168,0.24), rgba(159,132,178,0.12) 55%, rgba(255,255,255,0.03))'
+    : hot
+    ? 'linear-gradient(160deg, rgba(255,255,255,0.10), rgba(50,114,168,0.10) 55%, rgba(255,255,255,0.02))'
+    : 'linear-gradient(160deg, rgba(255,255,255,0.06), rgba(50,114,168,0.05) 55%, rgba(255,255,255,0.015))';
+  const glow = active
+    ? 'inset 0 1px 0 rgba(255,255,255,0.3), 0 20px 45px rgba(0,0,0,0.45), 0 0 30px rgba(50,114,168,0.35)'
+    : hot
+    ? 'inset 0 1px 0 rgba(255,255,255,0.22), 0 20px 40px rgba(0,0,0,0.4), 0 0 20px rgba(50,114,168,0.2)'
+    : 'inset 0 1px 0 rgba(255,255,255,0.10), 0 10px 26px rgba(0,0,0,0.3)';
+  return React.createElement('div', { onMouseEnter:()=>setHovered(true), onMouseLeave:()=>setHovered(false), onClick, style:{ position:'relative', cursor:onClick?'pointer':'default', borderRadius:20, transition:`transform 0.35s ${ease}`, transform:hot&&onClick?'translateY(-6px)':'none', ...style }},
+    // decorative glass layer — blur, tint, border, glow, sheen blobs (clipped to the rounded box)
+    React.createElement('div', { style:{ position:'absolute', inset:0, borderRadius:20, overflow:'hidden', background:glassBg, backdropFilter:'blur(22px) saturate(160%)', WebkitBackdropFilter:'blur(22px) saturate(160%)', border:'1px solid '+borderColor, boxShadow:glow, transition:`background 0.35s ${ease}, border-color 0.35s ${ease}, box-shadow 0.35s ${ease}`, pointerEvents:'none' }},
+      React.createElement('div', { style:{ position:'absolute', top:-70, left:-50, width:180, height:180, borderRadius:'50%', background:'radial-gradient(circle, rgba(255,255,255,0.16), transparent 70%)', opacity:hot?1:0.55, transition:'opacity 0.3s ease' }}),
+      React.createElement('div', { style:{ position:'absolute', bottom:-60, right:-30, width:160, height:160, borderRadius:'50%', background:`radial-gradient(circle, ${active?'rgba(159,132,178,0.24)':'rgba(50,114,168,0.15)'}, transparent 70%)`, transition:'background 0.35s ease' }})
+    ),
+    React.createElement('div', { style:{ position:'relative', zIndex:1, padding:'24px 26px' }}, children)
   );
 }
 
 /* ─── Glow Button ────────────────────────────────────────────────── */
 function GlowButton({ children, onClick, variant='primary', small=false, style={}, disabled=false, type='button' }) {
-  const base = { display:'inline-flex',alignItems:'center',justifyContent:'center',gap:8, padding:small?'8px 18px':'12px 28px', fontFamily:"'Space Grotesk',sans-serif", fontWeight:700,letterSpacing:'0.08em', fontSize:small?12:14, textTransform:'uppercase', border:'none',borderRadius:0,cursor:disabled?'not-allowed':'pointer', transition:'all 0.2s', opacity:disabled?0.5:1, ...style };
-  if (variant==='primary') return React.createElement('button',{type,onClick,disabled,style:{...base,background:'linear-gradient(135deg,#3272a8,#9f84b2,#3272a8)',backgroundSize:'200% 200%',animation:'btnGlow 3s ease infinite',color:'#fff',boxShadow:'0 0 20px rgba(50,114,168,0.5),0 0 40px rgba(159,132,178,0.2)'}},children);
-  if (variant==='ghost') return React.createElement('button',{type,onClick,disabled,style:{...base,background:'transparent',color:'#fff',border:'1px solid rgba(255,255,255,0.2)'}},children);
-  if (variant==='pink') return React.createElement('button',{type,onClick,disabled,style:{...base,background:'linear-gradient(135deg,#9f84b2,#3272a8)',backgroundSize:'200% 200%',animation:'btnGlow 3s ease infinite reverse',color:'#fff',boxShadow:'0 0 18px rgba(159,132,178,0.5)'}},children);
-  if (variant==='danger') return React.createElement('button',{type,onClick,disabled,style:{...base,background:'rgba(239,68,68,0.15)',color:'#ef4444',border:'1px solid rgba(239,68,68,0.3)'}},children);
+  const [hovered, setHovered] = useState(false);
+  const hot = hovered && !disabled;
+  const hoverProps = { onMouseEnter:()=>setHovered(true), onMouseLeave:()=>setHovered(false) };
+  const base = { display:'inline-flex',alignItems:'center',justifyContent:'center',gap:8, padding:small?'8px 18px':'12px 28px', fontFamily:"'Space Grotesk',sans-serif", fontWeight:700,letterSpacing:'0.08em', fontSize:small?12:14, textTransform:'uppercase', border:'none',borderRadius:12,cursor:disabled?'not-allowed':'pointer', transition:'all 0.25s cubic-bezier(0.16,1,0.3,1)', transform:hot?'translateY(-2px)':'none', opacity:disabled?0.5:1, ...style };
+  if (variant==='primary') return React.createElement('button',{type,onClick,disabled,...hoverProps,style:{...base,background:'linear-gradient(135deg,#3272a8,#9f84b2,#3272a8)',backgroundSize:'200% 200%',animation:'btnGlow 3s ease infinite',color:'#fff',boxShadow:hot?'0 8px 26px rgba(50,114,168,0.65),0 0 50px rgba(159,132,178,0.35)':'0 0 20px rgba(50,114,168,0.5),0 0 40px rgba(159,132,178,0.2)'}},children);
+  if (variant==='ghost') return React.createElement('button',{type,onClick,disabled,...hoverProps,style:{...base,background:hot?'rgba(255,255,255,0.08)':'transparent',color:'#fff',border:'1px solid '+(hot?'rgba(255,255,255,0.4)':'rgba(255,255,255,0.2)')}},children);
+  if (variant==='pink') return React.createElement('button',{type,onClick,disabled,...hoverProps,style:{...base,background:'linear-gradient(135deg,#9f84b2,#3272a8)',backgroundSize:'200% 200%',animation:'btnGlow 3s ease infinite reverse',color:'#fff',boxShadow:hot?'0 8px 26px rgba(159,132,178,0.65)':'0 0 18px rgba(159,132,178,0.5)'}},children);
+  if (variant==='danger') return React.createElement('button',{type,onClick,disabled,...hoverProps,style:{...base,background:hot?'rgba(239,68,68,0.22)':'rgba(239,68,68,0.15)',color:'#ef4444',border:'1px solid rgba(239,68,68,0.3)'}},children);
 }
 
 /* ─── Chip ───────────────────────────────────────────────────────── */
 function Chip({ label, color='#3272a8' }) {
-  return React.createElement('span',{style:{display:'inline-block',padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',background:color+'22',color,border:`1px solid ${color}55`,fontFamily:"'Space Grotesk',sans-serif"}},label);
+  return React.createElement('span',{style:{display:'inline-block',padding:'4px 12px',borderRadius:20,fontSize:11,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',background:`linear-gradient(135deg, ${color}33, ${color}14)`,color,border:`1px solid ${color}55`,boxShadow:`0 0 12px ${color}30`,fontFamily:"'Space Grotesk',sans-serif"}},label);
 }
 
 /* ─── Section Header ─────────────────────────────────────────────── */
 function SectionHeader({ title, subtitle }) {
   return React.createElement('div',{style:{marginBottom:40}},
+    React.createElement('div',{style:{width:56,height:3,marginBottom:14,background:'linear-gradient(90deg,#3272a8,#9f84b2)',boxShadow:'0 0 14px rgba(50,114,168,0.7)'}}),
     React.createElement('h2',{style:{fontFamily:"'Ethnocentric Rg','Orbitron','Space Grotesk',sans-serif",fontWeight:200,fontStretch:'expanded',fontSize:'clamp(24px,4vw,44px)',letterSpacing:'0.06em',color:'#fff',margin:0,textTransform:'uppercase'}},title),
     subtitle&&React.createElement('p',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:16,marginTop:8}},subtitle)
   );
@@ -173,7 +192,7 @@ function Spinner() {
 /* ─── Event Card ─────────────────────────────────────────────────── */
 function EventCard({ event, onSelect, onRegister }) {
   return React.createElement(FuturisticCard,{onClick:()=>onSelect(event)},
-    event.posterImage&&React.createElement('img',{src:event.posterImage,alt:event.title,style:{width:'100%',borderRadius:4,objectFit:'cover',maxHeight:180,marginBottom:14}}),
+    event.posterImage&&React.createElement('img',{src:event.posterImage,alt:event.title,style:{width:'100%',borderRadius:12,objectFit:'cover',maxHeight:180,marginBottom:14}}),
     React.createElement('div',{style:{display:'flex',gap:8,flexWrap:'wrap',marginBottom:10}},
       React.createElement(Chip,{label:event.status==='upcoming'?'Upcoming':'Past',color:event.status==='upcoming'?'#3272a8':'#64748b'}),
       event.isFree&&React.createElement(Chip,{label:'FREE',color:'#10b981'}),
@@ -197,7 +216,7 @@ function EventCard({ event, onSelect, onRegister }) {
 /* ─── Mix Card ───────────────────────────────────────────────────── */
 function MixCard({ mix, onPlay, isPlaying }) {
   return React.createElement(FuturisticCard,{active:isPlaying,onClick:()=>onPlay(mix)},
-    mix.coverImage&&React.createElement('img',{src:mix.coverImage,alt:mix.title,style:{width:'100%',height:140,objectFit:'cover',marginBottom:14}}),
+    mix.coverImage&&React.createElement('img',{src:mix.coverImage,alt:mix.title,style:{width:'100%',height:140,borderRadius:12,objectFit:'cover',marginBottom:14}}),
     React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}},
       React.createElement('div',{style:{width:52,height:52,flexShrink:0,clipPath:'polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))',background:isPlaying?'#3272a8':'rgba(50,114,168,0.15)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,boxShadow:isPlaying?'0 0 20px rgba(6,182,212,0.6)':'none',color:'#fff',transition:'all 0.2s'}},isPlaying?'⏸':'▶'),
       React.createElement('div',{style:{textAlign:'right'}},
@@ -263,6 +282,48 @@ function TicketCard({ ticket }) {
           React.createElement('div',{style:{fontFamily:"'Space Grotesk',sans-serif",color:'#fff',fontSize:13,fontWeight:600}},val)
         )
       )
+    )
+  );
+}
+
+// Groups tickets from the same purchase into one swipeable card so a multi-ticket buyer
+// sees "5 Tickets" instead of 5 unrelated-looking cards, and can flick through each QR
+// in turn at the door (each ticket still has its own independently-scannable QR code).
+function TicketGroup({ tickets }) {
+  const [idx, setIdx] = useState(0);
+  const touchStartX = useRef(null);
+  const count = tickets.length;
+  const event = tickets[0].event || {};
+
+  const goto = (i) => setIdx(Math.max(0, Math.min(count - 1, i)));
+  const onTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd = (e) => {
+    if (touchStartX.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(dx) > 40) goto(dx < 0 ? idx + 1 : idx - 1);
+    touchStartX.current = null;
+  };
+  const arrowStyle = (disabled) => ({
+    fontFamily:"'Space Grotesk',sans-serif",background:'transparent',border:'1px solid rgba(255,255,255,0.15)',
+    color:'#fff',width:26,height:26,borderRadius:'50%',cursor:disabled?'default':'pointer',opacity:disabled?0.25:1,
+    fontSize:14,lineHeight:1,display:'flex',alignItems:'center',justifyContent:'center',padding:0,
+  });
+
+  return React.createElement('div', { onTouchStart, onTouchEnd },
+    count > 1 && React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,padding:'0 4px',flexWrap:'wrap',gap:8} },
+      React.createElement('span', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'#3272a8',fontSize:12,fontWeight:800,textTransform:'uppercase',letterSpacing:'0.05em'} }, `${count} Tickets — ${event.title||'Event'}`),
+      React.createElement('div', { style:{display:'flex',alignItems:'center',gap:10} },
+        React.createElement('button', { onClick:()=>goto(idx-1), disabled:idx===0, style:arrowStyle(idx===0) }, '‹'),
+        React.createElement('span', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:12,minWidth:36,textAlign:'center'} }, `${idx+1} / ${count}`),
+        React.createElement('button', { onClick:()=>goto(idx+1), disabled:idx===count-1, style:arrowStyle(idx===count-1) }, '›')
+      )
+    ),
+    React.createElement(TicketCard, { ticket:tickets[idx] }),
+    count > 1 && React.createElement('div', { style:{display:'flex',justifyContent:'center',gap:6,marginTop:10} },
+      tickets.map((t,i) => React.createElement('div', {
+        key:t.id, onClick:()=>goto(i),
+        style:{width:i===idx?18:6,height:6,borderRadius:3,background:i===idx?'#3272a8':'rgba(255,255,255,0.2)',cursor:'pointer',transition:'width 0.2s'}
+      }))
     )
   );
 }

@@ -8,7 +8,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..database import get_db
-from ..models import Ticket, TicketType, Event, User
+from datetime import datetime
+from ..models import Ticket, TicketType, Event, User, TicketOrder
 from ..auth import require_user, require_admin, get_current_user, get_or_create_guest_user, ensure_guest_email_available
 from .. import meta_capi
 from .checkout import _send_ticket_confirmation
@@ -26,6 +27,7 @@ def _ticket_dict(t: Ticket) -> dict:
         "eventId": t.event_id, "holderName": t.holder_name,
         "holderEmail": t.holder_email, "qrCode": t.qr_code,
         "status": t.status, "issuedAt": t.issued_at.isoformat(),
+        "orderId": t.order_id,
     }
 
 
@@ -151,6 +153,86 @@ def admin_issue_ticket(data: AdminTicketIn, db: Session = Depends(get_db), _=Dep
     d = _ticket_dict(ticket)
     d["ticketTypeName"] = tt.name
     return d
+
+
+class AdminCashTicketIn(BaseModel):
+    email: str
+    holderName: str = ""
+    ticketTypeId: str
+    quantity: int = 1
+    amountPaidPence: int = None
+
+
+@router.post("/admin/tickets/cash")
+def admin_issue_cash_tickets(data: AdminCashTicketIn, db: Session = Depends(get_db), _=Depends(require_admin)):
+    """Issues tickets for an off-platform cash sale, attached to the buyer's existing
+    (or newly created) account so they show up under their My Tickets alongside anything
+    they bought through checkout."""
+    if data.quantity < 1 or data.quantity > 50:
+        raise HTTPException(400, "Quantity must be between 1 and 50")
+
+    email = data.email.strip().lower()
+    if not email:
+        raise HTTPException(400, "Email is required")
+
+    tt = db.query(TicketType).filter(TicketType.id == data.ticketTypeId).first()
+    if not tt:
+        raise HTTPException(404, "Ticket type not found")
+    if tt.sold_count + data.quantity > tt.capacity:
+        remaining = max(tt.capacity - tt.sold_count, 0)
+        raise HTTPException(400, f"Only {remaining} of this ticket type left")
+
+    user, created = get_or_create_guest_user(db, data.holderName, email)
+    holder_name = data.holderName.strip() or user.name
+
+    total_paid = data.amountPaidPence if data.amountPaidPence else tt.price * data.quantity
+    amount_each = total_paid // data.quantity
+
+    order = TicketOrder(
+        event_id=tt.event_id,
+        ticket_type_id=tt.id,
+        user_id=user.id,
+        holder_name=holder_name,
+        holder_email=email,
+        quantity=data.quantity,
+        unit_price_pence=tt.price,
+        total_pence=total_paid,
+        status="paid",
+        paid_at=datetime.utcnow(),
+    )
+    db.add(order)
+    db.flush()
+
+    tickets = []
+    for _ in range(data.quantity):
+        ticket = Ticket(
+            id="RNT-" + secrets.token_hex(6).upper(),
+            ticket_type_id=tt.id,
+            event_id=tt.event_id,
+            user_id=user.id,
+            order_id=order.id,
+            holder_name=holder_name,
+            holder_email=email,
+            qr_code=secrets.token_hex(6).upper(),
+            status="valid",
+            amount_paid_pence=amount_each,
+        )
+        tt.sold_count += 1
+        db.add(ticket)
+        tickets.append(ticket)
+    db.commit()
+    for t in tickets:
+        db.refresh(t)
+
+    event = db.query(Event).filter(Event.id == tt.event_id).first()
+    _send_ticket_confirmation(
+        db, event, tickets, holder_name, email,
+        user_id=user.id, guest_account_created=created,
+    )
+
+    result = _ticket_dict(tickets[0])
+    result["ticketIds"] = [t.id for t in tickets]
+    return result
 
 
 @router.get("/admin/tickets/search")

@@ -1,5 +1,6 @@
 import os
 import secrets
+import logging
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -11,6 +12,7 @@ from ..email_service import send_email
 from .. import meta_capi
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://rntech.live")
 
@@ -73,7 +75,7 @@ def register(data: RegisterIn, request: Request, db: Session = Depends(get_db)):
     db.flush()
 
     # Schedule drip campaign emails
-    for campaign in db.query(EmailCampaign).filter(EmailCampaign.active == True).all():
+    for campaign in db.query(EmailCampaign).filter(EmailCampaign.active == True, EmailCampaign.audience == "drip").all():
         db.add(EmailSend(
             id="snd-" + secrets.token_hex(8),
             campaign_id=campaign.id,
@@ -139,20 +141,22 @@ def forgot_password(data: dict, db: Session = Depends(get_db)):
         ))
         db.commit()
         reset_link = f"{BASE_URL}/?reset={token}"
-        send_email(
+        ok = send_email(
             to_email=user.email,
             to_name=user.name,
             subject="Reset your RNTECH password",
-            html_body=f"""
+            body_content=f"""
 <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#020810;color:#fff;">
   <h2 style="color:#3272a8;text-transform:uppercase;letter-spacing:0.06em;">Reset Your Password</h2>
   <p style="color:rgba(255,255,255,0.7);">Hi {user.first_name or user.name},</p>
-  <p style="color:rgba(255,255,255,0.7);">Click the button below to reset your RNTECH password. This link expires in 1 hour.</p>
+  <p style="color:rgba(255,255,255,0.7);">Click the button below to reset your RNTECH password. This link stays valid until you use it.</p>
   <a href="{reset_link}" style="display:inline-block;margin:20px 0;padding:14px 28px;background:#3272a8;color:#fff;text-decoration:none;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">Reset Password</a>
   <p style="color:rgba(255,255,255,0.3);font-size:12px;">If you didn't request this, ignore this email — your password won't change.</p>
   <p style="color:rgba(255,255,255,0.2);font-size:11px;">Or copy this link: {reset_link}</p>
 </div>""",
         )
+        if not ok:
+            logger.error(f"forgot-password: email send failed for {user.email} — reset token was still created")
     return {"ok": True}
 
 
@@ -163,8 +167,8 @@ def reset_password(data: dict, db: Session = Depends(get_db)):
     if len(new_pass) < 6:
         raise HTTPException(400, "Password must be at least 6 characters")
     row = db.query(PasswordResetToken).filter(PasswordResetToken.token == token_val).first()
-    if not row or row.used or row.expires_at < datetime.utcnow():
-        raise HTTPException(400, "This reset link is invalid or has expired")
+    if not row or row.used:
+        raise HTTPException(400, "This reset link is invalid or has already been used")
     user = db.query(User).filter(User.id == row.user_id).first()
     if not user:
         raise HTTPException(400, "User not found")

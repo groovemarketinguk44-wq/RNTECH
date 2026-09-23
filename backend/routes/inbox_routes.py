@@ -11,6 +11,7 @@ from ..database import get_db
 from ..auth import get_current_user
 from ..email_service import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL, FROM_NAME, send_email
 from ..settings_utils import get_setting
+from ..send_tracking import record_email_sent
 
 router = APIRouter()
 
@@ -314,4 +315,5 @@ def reply_message(data: dict, user=Depends(get_current_user), db: Session = Depe
             srv.starttls()
             srv.login(SMTP_USER, SMTP_PASS)
             srv.sendmail(FROM_EMAIL, to_email, msg.as_string())
+    record_email_sent(db)  # counts against the same shared mailbox limit as everything else
     return {"ok": True}

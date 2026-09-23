@@ -11,8 +11,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text, inspect as sa_inspect
 from .database import engine, SessionLocal
 from .models import Base
-from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout
-from .routes.campaigns import process_pending_sends
+from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout, offers
+from .routes.campaigns import process_pending_sends, run_throttled_sends, scan_bounces
 from .routes.inbox_routes import sweep_side_folders_to_inbox
 
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +30,37 @@ def _run_pending():
         n = process_pending_sends(db)
         if n:
             logger.info(f"Email scheduler: processed {n} pending sends")
+    finally:
+        db.close()
+
+
+def _run_throttled():
+    db = SessionLocal()
+    try:
+        run_throttled_sends(db)
+    finally:
+        db.close()
+
+
+def _run_budget_reconcile():
+    db = SessionLocal()
+    try:
+        from .send_tracking import reconcile_with_mailbox
+        reconcile_with_mailbox(db)
+    except Exception:
+        logger.exception("Email budget reconcile failed")
+    finally:
+        db.close()
+
+
+def _run_bounce_scan():
+    db = SessionLocal()
+    try:
+        n = scan_bounces(db)
+        if n:
+            logger.info(f"Bounce scan: marked {n} sends as bounced")
+    except Exception:
+        logger.exception("Bounce scan failed")
     finally:
         db.close()
 
@@ -79,12 +110,49 @@ async def lifespan(app: FastAPI):
         _migrate("ticket_orders",   "client_user_agent",    "TEXT")
         _migrate("events",          "ticket_banner_image", "TEXT")
         _migrate("events",          "ticket_bio",          "TEXT")
+        _migrate("ticket_types",    "sold_out",           "INTEGER DEFAULT 0")
+        _migrate("ticket_types",    "nearly_gone",        "INTEGER DEFAULT 0")
+        _migrate("email_campaigns", "audience", "TEXT DEFAULT 'drip'")
+        _migrate("email_campaigns", "audience_event_id", "TEXT")
+        _migrate("email_campaigns", "send_status", "TEXT DEFAULT 'draft'")
+        _migrate("email_campaigns", "gap_minutes", "INTEGER DEFAULT 20")
+        _migrate("email_campaigns", "daily_cap", "INTEGER DEFAULT 30")
+        _migrate("email_campaigns", "window_start_hour", "INTEGER DEFAULT 9")
+        _migrate("email_campaigns", "window_end_hour", "INTEGER DEFAULT 21")
+        _migrate("email_campaigns", "next_send_at", "DATETIME")
+        _migrate("email_campaigns", "started_at", "DATETIME")
+        _migrate("email_campaigns", "last_success_at", "DATETIME")
+        _migrate("email_campaigns", "last_error", "TEXT")
+        _migrate("email_campaigns", "last_error_at", "DATETIME")
+        _migrate("email_campaigns", "consecutive_failures", "INTEGER DEFAULT 0")
+        _migrate("email_campaigns", "pause_reason", "TEXT")
+        _migrate("email_sends", "to_email", "TEXT")
+        _migrate("email_sends", "attempts", "INTEGER DEFAULT 0")
+        _migrate("email_sends", "error", "TEXT")
+        _migrate("email_sends", "opened_at", "DATETIME")
+        _migrate("email_sends", "open_count", "INTEGER DEFAULT 0")
+        _migrate("email_sends", "bounced_at", "DATETIME")
+        _migrate("email_campaigns", "round_name", "TEXT DEFAULT 'default'")
+        _migrate("email_campaigns", "queue_position", "INTEGER DEFAULT 0")
+        _migrate("email_campaigns", "start_at", "DATETIME")
+        _migrate("users", "unsubscribed_at", "DATETIME")
+        _migrate("email_campaigns", "offer_event_id", "TEXT")
+        _migrate("email_campaigns", "offer_discount_bp", "INTEGER DEFAULT 0")
+        _migrate("email_campaigns", "offer_max_tickets", "INTEGER DEFAULT 4")
+        _migrate("email_campaigns", "offer_expires_at", "DATETIME")
+        _migrate("ticket_orders", "offer_id", "TEXT")
     # Ensure upload dirs exist
     for sub in ("images", "videos"):
         (UPLOAD_DIR / sub).mkdir(parents=True, exist_ok=True)
     # Start email scheduler (runs hourly)
     scheduler.add_job(_run_pending, "interval", hours=1, id="email_drip")
     scheduler.add_job(_run_mail_sweep, "interval", minutes=10, id="mail_sweep")
+    # Paced campaign sending: one email per running campaign per tick, gated by its own gap/cap/window.
+    scheduler.add_job(_run_throttled, "interval", seconds=30, id="throttled_sends", max_instances=1, coalesce=True)
+    scheduler.add_job(_run_bounce_scan, "interval", minutes=10, id="bounce_scan", max_instances=1, coalesce=True)
+    # Keeps the dashboard's "sent today" figure accurate even between campaign sends — e.g. right
+    # after a ticket sale emails a confirmation, before any campaign is due to check again.
+    scheduler.add_job(_run_budget_reconcile, "interval", minutes=5, id="budget_reconcile", max_instances=1, coalesce=True)
     scheduler.start()
     yield
     scheduler.shutdown(wait=False)
@@ -100,6 +168,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_cache_static_app_code(request, call_next):
+    # /static serves the SPA's own JS (ui.jsx, pages.jsx, admin_pages.jsx, api.js, auth.js),
+    # not just images — Starlette's default StaticFiles response has no Cache-Control, only
+    # ETag/Last-Modified, so browsers fall back to heuristic caching. Mobile browsers cache
+    # far more aggressively under that heuristic than desktop, so a deploy can update the
+    # page shell (index.html already forces revalidation, see serve_app below) while a phone
+    # keeps running old cached app code indefinitely. ETag still makes revalidation cheap
+    # (304s), this just stops the browser from skipping the check.
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
 # ── API routes ───────────────────────────────────────────────────────────────
 for router in [
     auth_routes.router,
@@ -113,6 +196,7 @@ for router in [
     inbox_routes.router,
     settings_routes.router,
     checkout.router,
+    offers.router,
 ]:
     app.include_router(router, prefix="/api")
 
@@ -141,3 +225,16 @@ def serve_app():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# OneSignal's Web Push SDK requires these served from the site root (not /static) so the
+# service worker's scope covers the whole origin — without this, push permission/opt-in can
+# silently "succeed" client-side while no real subscription is ever created server-side.
+@app.get("/OneSignalSDKWorker.js")
+@app.get("/OneSignalSDKUpdaterWorker.js")
+def serve_onesignal_worker():
+    return FileResponse(
+        str(FRONTEND_DIR / "OneSignalSDKWorker.js"),
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/"},
+    )

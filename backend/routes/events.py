@@ -1,5 +1,8 @@
 import json
 import secrets
+import time
+import random
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 import os
@@ -15,6 +18,7 @@ from ..email_service import send_email
 router = APIRouter()
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://rntech.live")
+logger = logging.getLogger(__name__)
 
 
 def _tt_dict(tt: TicketType) -> dict:
@@ -25,6 +29,8 @@ def _tt_dict(tt: TicketType) -> dict:
         "price": tt.effective_price, "capacity": total_capacity, "soldCount": tt.sold_count,
         "active": tt.active, "description": tt.description,
         "isTiered": bool(tt.is_tiered), "tiers": tiers,
+        "soldOut": bool(tt.sold_out),
+        "nearlyGone": bool(tt.nearly_gone),
     }
 
 
@@ -81,6 +87,11 @@ class EventIn(BaseModel):
     registrationMode: str = "open"
 
 
+def _unfeature_others(db: Session, keep_id: str):
+    # The homepage hero and /buy both resolve to *the* featured event, so only one can hold the flag.
+    db.query(Event).filter(Event.id != keep_id, Event.featured == True).update({"featured": False})
+
+
 @router.post("/admin/events")
 def create_event(data: EventIn, db: Session = Depends(get_db), _=Depends(require_admin)):
     slug = data.title.lower().replace(" ", "-") + "-" + secrets.token_hex(3)
@@ -104,6 +115,8 @@ def create_event(data: EventIn, db: Session = Depends(get_db), _=Depends(require
         registration_mode=data.registrationMode,
     )
     db.add(e)
+    if data.featured:
+        _unfeature_others(db, e.id)
     db.commit()
     db.refresh(e)
     return _event_dict(e)
@@ -129,6 +142,8 @@ def update_event(event_id: str, data: EventIn, db: Session = Depends(get_db), _=
     e.is_free = data.isFree
     e.featured = data.featured
     e.registration_mode = data.registrationMode
+    if data.featured:
+        _unfeature_others(db, e.id)
     db.commit()
     db.refresh(e)
     return _event_dict(e)
@@ -214,12 +229,16 @@ class TicketTypeIn(BaseModel):
     active: bool = True
     isTiered: bool = False
     tiers: List[dict] = []  # [{capacity: int, price_pence: int}]
+    soldOut: bool = False
+    nearlyGone: bool = False
 
 
 def _apply_tt_data(tt: TicketType, data: TicketTypeIn):
     tt.name = data.name
     tt.description = data.description
     tt.active = data.active
+    tt.sold_out = data.soldOut
+    tt.nearly_gone = data.nearlyGone
     if data.isTiered and data.tiers:
         tt.is_tiered = True
         tt.tiers_json = json.dumps(data.tiers)
@@ -260,6 +279,21 @@ def delete_ticket_type(tt_id: str, db: Session = Depends(get_db), _=Depends(requ
         raise HTTPException(404, "Ticket type not found")
     db.delete(tt)
     db.commit()
+
+
+class SoldOutIn(BaseModel):
+    soldOut: bool
+
+
+@router.patch("/admin/ticket-types/{tt_id}/sold-out")
+def set_ticket_type_sold_out(tt_id: str, data: SoldOutIn, db: Session = Depends(get_db), _=Depends(require_admin)):
+    tt = db.query(TicketType).filter(TicketType.id == tt_id).first()
+    if not tt:
+        raise HTTPException(404, "Ticket type not found")
+    tt.sold_out = data.soldOut
+    db.commit()
+    db.refresh(tt)
+    return _tt_dict(tt)
 
 
 # ── Event Interest / Waitlist ─────────────────────────────────────────────────
@@ -440,6 +474,8 @@ def approve_interest(interest_id: str, db: Session = Depends(get_db), _=Depends(
 
 class InviteIn(BaseModel):
     discountPercent: int = 0
+    subject: str = ""
+    message: str = ""
 
 
 def _prepare_invite(i: EventInterest, discount_percent: int) -> str:
@@ -453,26 +489,41 @@ def _prepare_invite(i: EventInterest, discount_percent: int) -> str:
     return f"{FRONTEND_URL}/?invite={i.invite_token}"
 
 
-def _email_invite(email: str, name: str, event_title: str, discount_percent: int, link: str):
-    offer_line = f"<p>You've got <b>{discount_percent}% off</b> any ticket type for this event.</p>" if discount_percent > 0 else ""
+def _message_html(message: str) -> str:
+    """Turns a plain-text admin message into paragraph HTML (blank line = new paragraph)."""
+    paras = [p.strip() for p in message.split("\n\n") if p.strip()]
+    return "".join(f"<p>{p.replace(chr(10), '<br>')}</p>" for p in paras)
+
+
+def _email_invite(email: str, name: str, event_title: str, discount_percent: int, link: str,
+                   subject: str = "", message: str = "") -> bool:
+    """Returns whether the email actually sent — callers must check this rather than
+    assume success, since a bad SMTP send here previously went unnoticed."""
+    if message.strip():
+        intro = _message_html(message)
+        offer_line = ""
+    else:
+        intro = f"<p>Good news — you're off the waitlist for <b>{event_title}</b>!</p>"
+        offer_line = f"<p>You've got <b>{discount_percent}% off</b> any ticket type for this event.</p>" if discount_percent > 0 else ""
     try:
-        send_email(
+        return send_email(
             email, name,
-            f"You're invited — grab your ticket to {event_title}",
-            f"<p>Good news — you're off the waitlist for <b>{event_title}</b>!</p>"
+            subject.strip() or f"You're invited — grab your ticket to {event_title}",
+            f"{intro}"
             f"{offer_line}"
             f"<p><a href='{link}' style='background:#3272a8;color:#fff;padding:12px 20px;"
             f"text-decoration:none;display:inline-block;'>Buy your ticket</a></p>"
             f"<p>Or copy this link: {link}</p>",
         )
     except Exception:
-        pass
+        return False
 
 
-def _send_invite(i: EventInterest, discount_percent: int, event_title: str) -> str:
+def _send_invite(i: EventInterest, discount_percent: int, event_title: str,
+                  subject: str = "", message: str = "") -> str:
     """Marks an interest as invited and emails their personal checkout link. Returns the link."""
     link = _prepare_invite(i, discount_percent)
-    _email_invite(i.email, i.name, event_title, discount_percent, link)
+    _email_invite(i.email, i.name, event_title, discount_percent, link, subject, message)
     return link
 
 
@@ -487,7 +538,7 @@ def invite_interest(interest_id: str, data: InviteIn, db: Session = Depends(get_
         raise HTTPException(400, "Discount must be between 0 and 100")
 
     event = db.query(Event).filter(Event.id == i.event_id).first()
-    link = _send_invite(i, data.discountPercent, event.title if event else "the event")
+    link = _send_invite(i, data.discountPercent, event.title if event else "the event", data.subject, data.message)
     db.commit()
 
     d = _interest_dict(i)
@@ -499,6 +550,8 @@ class BulkInviteIn(BaseModel):
     interestIds: List[str]
     eventId: str
     discountPercent: int = 0
+    subject: str = ""
+    message: str = ""
 
 
 @router.post("/admin/interest/bulk-invite")
@@ -525,7 +578,7 @@ def bulk_invite_interest(data: BulkInviteIn, db: Session = Depends(get_db), _=De
         if i.status == "approved":
             skipped.append({"id": interest_id, "reason": "already has a ticket"})
             continue
-        _send_invite(i, data.discountPercent, event_title)
+        _send_invite(i, data.discountPercent, event_title, data.subject, data.message)
         invited.append(interest_id)
 
     db.commit()
@@ -537,54 +590,73 @@ def invite_all_attendees(
     event_id: str, data: InviteIn, background_tasks: BackgroundTasks,
     db: Session = Depends(get_db), _=Depends(require_admin),
 ):
-    """Invites every registered attendee who isn't already on this event's waitlist
-    (pending/invited/rejected/approved) and doesn't already hold a ticket for it."""
+    """Invites every subscribed attendee who doesn't already hold a ticket for this event
+    (checked against both the linked account and the actual ticket holder email — a guest
+    checkout under a different email still counts as ticketed). Anyone with an earlier,
+    unused invite for this event gets a fresh token + discount rather than being skipped —
+    an unused invite isn't a reason to withhold a new offer."""
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(404, "Event not found")
     if not (0 <= data.discountPercent <= 100):
         raise HTTPException(400, "Discount must be between 0 and 100")
 
-    already_on_waitlist = {
-        i.email for i in db.query(EventInterest).filter(EventInterest.event_id == event_id).all()
-    }
-    already_ticketed_user_ids = {
-        t.user_id for t in db.query(Ticket).filter(
-            Ticket.event_id == event_id, Ticket.user_id.isnot(None)
-        ).all()
+    event_tickets = db.query(Ticket).filter(Ticket.event_id == event_id).all()
+    already_ticketed_user_ids = {t.user_id for t in event_tickets if t.user_id}
+    already_ticketed_emails = {t.holder_email.lower() for t in event_tickets if t.holder_email}
+    existing_interests = {
+        i.email: i for i in db.query(EventInterest).filter(EventInterest.event_id == event_id).all()
     }
 
-    users = db.query(User).filter(User.role == "user").all()
+    users = db.query(User).filter(User.role == "user", User.subscribed == True).all()
     to_invite = [
         u for u in users
-        if u.email not in already_on_waitlist and u.id not in already_ticketed_user_ids
+        if u.id not in already_ticketed_user_ids
+        and u.email.lower() not in already_ticketed_emails
     ]
 
-    to_email = []  # (email, name, link) — dispatched after commit, in the background
+    to_email = []  # (email, name, link) — dispatched after commit, throttled in the background
     for u in to_invite:
-        i = EventInterest(
-            event_id=event_id, user_id=u.id, name=u.name,
-            first_name=u.first_name, last_name=u.last_name,
-            email=u.email, instagram=u.instagram, status="pending",
-        )
-        db.add(i)
-        db.flush()
+        i = existing_interests.get(u.email)
+        if not i:
+            i = EventInterest(
+                event_id=event_id, user_id=u.id, name=u.name,
+                first_name=u.first_name, last_name=u.last_name,
+                email=u.email, instagram=u.instagram, status="pending",
+            )
+            db.add(i)
+            db.flush()
         link = _prepare_invite(i, data.discountPercent)
         to_email.append((u.email, u.name, link))
     db.commit()
 
     event_title = event.title
     discount_percent = data.discountPercent
-
-    discount_percent = data.discountPercent
+    subject, message = data.subject, data.message
 
     def _send_all():
-        for email, name, link in to_email:
-            _email_invite(email, name, event_title, discount_percent, link)
+        consecutive_failures = 0
+        for idx, (email, name, link) in enumerate(to_email):
+            ok = _email_invite(email, name, event_title, discount_percent, link, subject, message)
+            if ok:
+                consecutive_failures = 0
+                logger.info(f"invite-attendees: sent {idx + 1}/{len(to_email)} to {email}")
+            else:
+                consecutive_failures += 1
+                logger.error(f"invite-attendees: FAILED {idx + 1}/{len(to_email)} to {email}")
+                if consecutive_failures >= 3:
+                    logger.error(
+                        f"invite-attendees: aborting after {consecutive_failures} consecutive "
+                        f"failures — {len(to_email) - idx - 1} recipients never attempted "
+                        f"(likely rate-limited by the mail provider, not a bad address each time)"
+                    )
+                    return
+            if idx < len(to_email) - 1:
+                time.sleep(random.uniform(30, 45))
 
     background_tasks.add_task(_send_all)
 
-    return {"invited": len(to_invite), "alreadyHandled": len(users) - len(to_invite)}
+    return {"invited": len(to_invite), "alreadyTicketed": len(users) - len(to_invite)}
 
 
 @router.put("/admin/interest/{interest_id}/reject")

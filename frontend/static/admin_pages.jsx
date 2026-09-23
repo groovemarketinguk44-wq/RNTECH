@@ -68,28 +68,465 @@ function Modal({ title, onClose, children }) {
   );
 }
 
-function StatCard({ label, value, color }) {
-  return React.createElement('div', { style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',padding:'20px 24px',border:'1px solid rgba(255,255,255,0.06)'} },
-    React.createElement('div', { style:{...FS,color,fontSize:36,fontWeight:800} }, value),
-    React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.12em',textTransform:'uppercase',marginTop:4} }, label)
+// Shimmer presets for milestone tiers — reuses the site's existing `starShimmer` keyframe.
+const GOLD_SHIMMER = { gradient:'linear-gradient(90deg,#8a6a1f 0%,#ffe9a8 20%,#fff6da 40%,#ffe9a8 55%,#c99a2e 75%,#ffe9a8 90%,#8a6a1f 100%)', glow:'drop-shadow(0 0 10px rgba(212,175,55,0.55))', solid:'#d4af37' };
+const PLATINUM_SHIMMER = { gradient:'linear-gradient(90deg,#8fb8d6 0%,#ffffff 20%,#eaf6ff 40%,#ffffff 55%,#b9e6ff 75%,#ffffff 90%,#8fb8d6 100%)', glow:'drop-shadow(0 0 12px rgba(180,235,255,0.65))', solid:'#a5f3fc' };
+
+// Profit tier vs the two targets — shared by the Profit stat card and the progress bars.
+function profitTier(profitPence, goalPence, stretchGoalPence) {
+  if (profitPence == null) return 'unknown';
+  if (profitPence < 0) return 'loss';
+  if (profitPence >= stretchGoalPence) return 'platinum';
+  if (profitPence >= goalPence) return 'gold';
+  return 'green';
+}
+
+function StatCard({ label, value, color, shimmer }) {
+  const fontSize = fitFontSize(value);
+  const valueStyle = shimmer
+    ? { ...FS,fontSize,fontWeight:800,lineHeight:1.15,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
+        background:shimmer.gradient,backgroundSize:'250% 100%',backgroundClip:'text',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',
+        filter:shimmer.glow,animation:'starShimmer 3s linear infinite' }
+    : { ...FS,color,fontSize,fontWeight:800,lineHeight:1.15,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' };
+  return React.createElement('div', { style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',padding:'16px 18px',border:`1px solid ${shimmer?'rgba(255,255,255,0.18)':'rgba(255,255,255,0.06)'}`,minWidth:0,boxSizing:'border-box',overflow:'hidden',boxShadow:shimmer?`0 0 20px ${shimmer===PLATINUM_SHIMMER?'rgba(180,235,255,0.15)':'rgba(212,175,55,0.15)'}`:'none'} },
+    React.createElement('div', { style:valueStyle, title:String(value) }, value),
+    React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:10,letterSpacing:'0.1em',textTransform:'uppercase',marginTop:6,lineHeight:1.4} }, label)
+  );
+}
+
+// Click-to-edit money stat — used for the manually-entered DJ spend figure.
+function EditableStat({ label, pence, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState((pence/100).toFixed(2));
+  useEffect(() => { setVal((pence/100).toFixed(2)); }, [pence]);
+  const display = '£'+(pence/100).toFixed(2);
+  const fontSize = fitFontSize(display+' X'); // reserve room for the pencil icon
+
+  const commit = () => {
+    const n = Math.round(parseFloat(val || '0') * 100);
+    setEditing(false);
+    if (!isNaN(n) && n >= 0 && n !== pence) onSave(n);
+    else setVal((pence/100).toFixed(2));
+  };
+
+  return React.createElement('div', {
+    onClick:()=>!editing && setEditing(true),
+    style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',padding:'16px 18px',border:'1px solid rgba(255,255,255,0.06)',minWidth:0,boxSizing:'border-box',overflow:'hidden',cursor:'pointer'}
+  },
+    editing
+      ? React.createElement('input', {
+          autoFocus:true, type:'number', step:'0.01', min:'0', value:val,
+          onChange:e=>setVal(e.target.value), onBlur:commit,
+          onKeyDown:e=>{ if(e.key==='Enter') commit(); if(e.key==='Escape'){ setVal((pence/100).toFixed(2)); setEditing(false); } },
+          onClick:e=>e.stopPropagation(),
+          style:{...FS,color:'#f59e0b',fontSize,fontWeight:800,background:'transparent',border:'none',borderBottom:'1px solid #f59e0b',outline:'none',width:'100%',padding:0}
+        })
+      : React.createElement('div', { style:{...FS,color:'#f59e0b',fontSize,fontWeight:800,lineHeight:1.15,display:'flex',alignItems:'center',gap:6,whiteSpace:'nowrap',overflow:'hidden'} },
+          React.createElement('span', { style:{overflow:'hidden',textOverflow:'ellipsis'} }, display),
+          React.createElement('span', { style:{fontSize:12,opacity:0.35,flexShrink:0} }, '✎')
+        ),
+    React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:10,letterSpacing:'0.1em',textTransform:'uppercase',marginTop:6,lineHeight:1.4} }, label)
+  );
+}
+
+// Net Revenue stat with a click-to-add-cash affordance, styled to match EditableStat's
+// pencil-icon pattern — adds a cash sale amount on top of Stripe net revenue rather than
+// overwriting it (cash sales accumulate, they don't replace), so the input starts blank.
+function AddCashStat({ label, pence, onAdd }) {
+  const [adding, setAdding] = useState(false);
+  const [val, setVal] = useState('');
+  const display = gbp(pence);
+  const fontSize = fitFontSize(display+' X'); // reserve room for the + icon
+
+  const commit = () => {
+    const n = Math.round(parseFloat(val || '0') * 100);
+    setAdding(false);
+    setVal('');
+    if (!isNaN(n) && n > 0) onAdd(n);
+  };
+
+  return React.createElement('div', {
+    onClick:()=>!adding && setAdding(true), title:'Add cash sale',
+    style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',padding:'16px 18px',border:'1px solid rgba(255,255,255,0.06)',minWidth:0,boxSizing:'border-box',overflow:'hidden',cursor:'pointer'}
+  },
+    adding
+      ? React.createElement('div', { style:{display:'flex',alignItems:'baseline',gap:4} },
+          React.createElement('span', { style:{...FS,color:'#06b6d4',fontSize:16,fontWeight:800} }, '£'),
+          React.createElement('input', {
+            autoFocus:true, type:'number', step:'0.01', min:'0', value:val,
+            placeholder:'0.00',
+            onChange:e=>setVal(e.target.value), onBlur:commit,
+            onKeyDown:e=>{ if(e.key==='Enter') commit(); if(e.key==='Escape'){ setVal(''); setAdding(false); } },
+            onClick:e=>e.stopPropagation(),
+            style:{...FS,color:'#06b6d4',fontSize:20,fontWeight:800,background:'transparent',border:'none',borderBottom:'1px solid #06b6d4',outline:'none',width:'100%',padding:0}
+          })
+        )
+      : React.createElement('div', { style:{...FS,color:'#06b6d4',fontSize,fontWeight:800,lineHeight:1.15,display:'flex',alignItems:'center',gap:6,whiteSpace:'nowrap',overflow:'hidden'} },
+          React.createElement('span', { style:{overflow:'hidden',textOverflow:'ellipsis'} }, display),
+          React.createElement('span', { style:{fontSize:14,opacity:0.5,flexShrink:0} }, '+')
+        ),
+    React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:10,letterSpacing:'0.1em',textTransform:'uppercase',marginTop:6,lineHeight:1.4} }, label)
+  );
+}
+
+const PROFIT_GOAL_PENCE = 50000;         // £500 goal — mirrors backend PROFIT_GOAL_PENCE
+const PROFIT_STRETCH_GOAL_PENCE = 100000; // £1,000 stretch goal — mirrors backend PROFIT_STRETCH_GOAL_PENCE
+
+const eventFilterSelectStyle = {...FS,padding:'6px 10px',background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'#fff',fontSize:11,fontWeight:700,letterSpacing:'0.04em',textTransform:'uppercase',outline:'none',cursor:'pointer'};
+
+// Event filter dropdown — scopes Payments (tickets/revenue/DJ spend/profit/targets) to one event, or "All Events".
+function EventFilter({ events, selectedEventId, onChange }) {
+  return React.createElement('select', {
+    value:selectedEventId || '', onChange:e=>onChange(e.target.value || null), style:eventFilterSelectStyle
+  },
+    React.createElement('option', { value:'', style:{background:'#040c18'} }, 'All Events'),
+    events.map(e => React.createElement('option', { key:e.id, value:e.id, style:{background:'#040c18'} }, e.title))
+  );
+}
+
+// Two progress bars toward the profit goal / stretch goal, tracking the same tier colors as the Profit stat card.
+function ProfitTargets({ loading, profitPence, goalPence, stretchGoalPence, events, selectedEventId, onChangeEvent }) {
+  const bars = [
+    { label:'Goal', target:goalPence },
+    { label:'Stretch Goal', target:stretchGoalPence },
+  ];
+  return React.createElement('div', { style:{ marginBottom:32 } },
+    React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:12} },
+      React.createElement('h3', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',margin:0} }, 'Event Profit Targets'),
+      React.createElement(EventFilter, { events, selectedEventId, onChange:onChangeEvent })
+    ),
+    loading
+      ? React.createElement(Spinner)
+      : profitPence == null
+      ? React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)',fontSize:11} }, 'Profit unavailable — check STRIPE_SECRET_KEY is configured.')
+      : React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:16} },
+      bars.map(b => {
+        const pct = (profitPence / b.target) * 100;
+        const hit = profitPence >= b.target;
+        const isLoss = profitPence < 0;
+        const barColor = isLoss ? '#ef4444' : hit ? (b.target===stretchGoalPence ? PLATINUM_SHIMMER.solid : GOLD_SHIMMER.solid) : '#10b981';
+        // A loss reads as a % of two different targets differently (same £ deficit, different denominator) — showing
+        // two different negative percentages for one number is confusing, so just say LOSS instead of doing that math.
+        const pctLabel = isLoss ? 'LOSS' : Math.round(pct)+'%';
+        return React.createElement('div', { key:b.label, style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',border:'1px solid rgba(255,255,255,0.06)',padding:'16px 18px',boxSizing:'border-box',minWidth:0} },
+          React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:10,gap:8,flexWrap:'wrap'} },
+            React.createElement('span', { style:{...FS,fontSize:11,color:'rgba(255,255,255,0.5)',textTransform:'uppercase',letterSpacing:'0.08em'} }, `${b.label} · £${(b.target/100).toFixed(0)}`),
+            React.createElement('span', { style:{...FS,fontSize:13,fontWeight:800,color:barColor} }, pctLabel)
+          ),
+          React.createElement('div', { style:{height:8,background:'rgba(255,255,255,0.08)',borderRadius:4,overflow:'hidden'} },
+            React.createElement('div', { style:{height:'100%',width:Math.max(0,Math.min(100,pct))+'%',background:barColor,borderRadius:4,transition:'width 0.4s,background 0.4s'} })
+          )
+        );
+      })
+    )
   );
 }
 
 function TabBar({ tabs, active, onChange }) {
-  return React.createElement('div', { style:{display:'flex',gap:8,marginBottom:32,flexWrap:'wrap',borderBottom:'1px solid rgba(255,255,255,0.08)',paddingBottom:0} },
+  return React.createElement('div', { className:'admin-tabbar', style:{display:'flex',gap:4,marginBottom:32,overflowX:'auto',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',borderBottom:'1px solid rgba(255,255,255,0.08)',paddingBottom:0} },
     tabs.map(t => React.createElement('button', {
-      key:t.id, onClick:()=>onChange(t.id),
-      style:{...FS,padding:'10px 20px',border:'none',borderBottom:active===t.id?'2px solid #3272a8':'2px solid transparent',cursor:'pointer',fontWeight:700,fontSize:13,letterSpacing:'0.06em',textTransform:'uppercase',background:'transparent',color:active===t.id?'#3272a8':'rgba(255,255,255,0.45)',transition:'color 0.15s',marginBottom:-1}
+      key:t.id, onClick:(e)=>{ onChange(t.id); e.currentTarget.scrollIntoView({block:'nearest', inline:'center', behavior:'smooth'}); },
+      style:{...FS,flexShrink:0,whiteSpace:'nowrap',padding:'10px 16px',border:'none',borderBottom:active===t.id?'2px solid #3272a8':'2px solid transparent',cursor:'pointer',fontWeight:700,fontSize:13,letterSpacing:'0.06em',textTransform:'uppercase',background:'transparent',color:active===t.id?'#3272a8':'rgba(255,255,255,0.45)',transition:'color 0.15s',marginBottom:-1}
     }, t.label + (t.badge?' ('+t.badge+')':'')))
   );
 }
 
 // ── Overview ─────────────────────────────────────────────────────────────────
+const gbp = (pence) => {
+  const v = (pence || 0) / 100;
+  return (v < 0 ? '-£' : '£') + Math.abs(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+// Sizes a stat value by its own character count (not viewport width) so it always
+// fits its card regardless of how many cards share the row.
+function fitFontSize(text) {
+  const len = String(text).length;
+  if (len <= 4) return 32;
+  if (len <= 6) return 28;
+  if (len <= 8) return 24;
+  if (len <= 10) return 20;
+  return 17;
+}
+
+// Rounds a max value up to a "clean" gridline ceiling (1/2/5 * 10^n)
+function niceCeiling(value) {
+  if (value <= 0) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(value)));
+  const norm = value / mag;
+  const step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  return step * mag;
+}
+
+// Shared bar chart: flat fill, 4px rounded data-end, gridlines, hover tooltip.
+// series: [{date, value, ...extra}]  tooltipLines(d) => [{label,value}]
+function BarChart({ series, color, valueFormatter, tooltipLines }) {
+  const [hover, setHover] = useState(null);
+  const max = niceCeiling(Math.max(1, ...series.map(d => d.value)));
+  const showEvery = series.length > 20 ? Math.ceil(series.length / 10) : 1;
+  const ticks = [max, max / 2, 0];
+  const barMaxWidth = 24;
+
+  return React.createElement('div', { style:{ position:'relative' } },
+    hover != null && React.createElement('div', {
+      style:{
+        position:'absolute', bottom:'100%', marginBottom:8,
+        left:`${(hover / Math.max(1,series.length-1)) * 100}%`, transform:'translateX(-50%)',
+        background:'#0a1628', border:'1px solid rgba(255,255,255,0.15)', borderRadius:4,
+        padding:'8px 12px', whiteSpace:'nowrap', zIndex:5, pointerEvents:'none',
+        boxShadow:'0 4px 16px rgba(0,0,0,0.4)'
+      }
+    },
+      React.createElement('div', { style:{...FS,fontSize:10,color:'rgba(255,255,255,0.4)',marginBottom:4,letterSpacing:'0.05em'} }, series[hover].tooltipTitle || series[hover].date),
+      tooltipLines(series[hover]).map((l,i) => React.createElement('div', { key:i, style:{display:'flex',alignItems:'center',gap:6,fontSize:12} },
+        React.createElement('span', { style:{ width:8,height:2,background:color,display:'inline-block',borderRadius:1 } }),
+        React.createElement('span', { style:{...FS,color:'#fff',fontWeight:700} }, l.value),
+        React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11} }, l.label)
+      ))
+    ),
+    React.createElement('div', { style:{ display:'flex' } },
+      React.createElement('div', { style:{ display:'flex',flexDirection:'column',justifyContent:'space-between',height:120,paddingRight:8,paddingBottom:20 } },
+        ticks.map((t,i) => React.createElement('div', { key:i, style:{...FS,fontSize:9,color:'rgba(255,255,255,0.3)',textAlign:'right',lineHeight:1} }, valueFormatter(t)))
+      ),
+      React.createElement('div', { style:{ flex:1,position:'relative' } },
+        React.createElement('div', { style:{ position:'absolute',inset:'0 0 20px 0' } },
+          ticks.map((t,i) => React.createElement('div', { key:i, style:{ position:'absolute',left:0,right:0,top:`${(1-(t/max))*100}%`,borderTop:'1px solid rgba(255,255,255,0.06)' } }))
+        ),
+        React.createElement('div', { style:{ display:'flex',alignItems:'flex-end',gap:series.length>45?1:3,height:120,paddingBottom:20,position:'relative' } },
+          series.map((d, i) => React.createElement('div', {
+            key:d.date,
+            onMouseEnter:()=>setHover(i), onMouseLeave:()=>setHover(h=>h===i?null:h),
+            style:{ flex:1,maxWidth:barMaxWidth,display:'flex',flexDirection:'column',alignItems:'center',height:'100%',justifyContent:'flex-end',cursor:'default',position:'relative' }
+          },
+            React.createElement('div', { style:{ width:'100%',minHeight:d.value>0?3:0,height:`${(d.value/max)*100}%`,background:d.value>0?color:'rgba(255,255,255,0.06)',opacity:hover===i?0.75:1,borderRadius:'4px 4px 0 0',transition:'height 0.2s,opacity 0.15s' } }),
+            i % showEvery === 0 && React.createElement('div', { style:{ ...FS,fontSize:9,color:'rgba(255,255,255,0.3)',position:'absolute',top:'100%',marginTop:6,whiteSpace:'nowrap' } }, d.label != null ? d.label : d.date.slice(5))
+          ))
+        )
+      )
+    )
+  );
+}
+
+function TicketsPerDayChart({ series }) {
+  const mapped = series.map(d => ({ ...d, value:d.ticketsSold }));
+  return React.createElement(BarChart, {
+    series:mapped, color:'#06b6d4', valueFormatter:v=>Math.round(v).toLocaleString('en-GB'),
+    tooltipLines:d => [{ value:d.ticketsSold, label:d.ticketsSold===1?'ticket sold':'tickets sold' }]
+  });
+}
+
+function SpendPerDayChart({ series }) {
+  const mapped = series.map(d => ({ ...d, value:d.spend }));
+  return React.createElement(BarChart, {
+    series:mapped, color:'#f59e0b', valueFormatter:v=>'£'+Math.round(v).toLocaleString('en-GB'),
+    tooltipLines:d => [
+      { value:'£'+d.spend.toFixed(2), label:'spend' },
+      { value:d.clicks, label:d.clicks===1?'click':'clicks' },
+    ]
+  });
+}
+
+function MetaAdsSection({ days, eventId }) {
+  const [ads, setAds] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    window.RNTECH_API.getMetaAdsOverview(days, eventId).then(d => { setAds(d); setLoading(false); }).catch(()=>setLoading(false));
+  }, [days, eventId]);
+
+  if (loading || !ads) return React.createElement(Spinner);
+  if (!ads.available) {
+    return React.createElement('p', { style:{...FS,color:'rgba(245,158,11,0.7)',fontSize:11,marginTop:24} }, 'Meta Ads data unavailable — check META_ADS_ACCESS_TOKEN and META_AD_ACCOUNT_ID are configured.');
+  }
+
+  return React.createElement('div', { style:{ marginTop:32 } },
+    React.createElement('h3', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',margin:'0 0 16px'} }, `Meta Ads (${days}D)`),
+    React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:16,marginBottom:20} },
+      React.createElement(StatCard, { label:'Ad Spend', value:'£'+ads.spend.toFixed(2), color:'#f59e0b' }),
+      React.createElement(StatCard, { label:'Impressions', value:ads.impressions.toLocaleString('en-GB'), color:'#3272a8' }),
+      React.createElement(StatCard, { label:'Clicks', value:ads.clicks.toLocaleString('en-GB'), color:'#06b6d4' }),
+      React.createElement(StatCard, { label:'CTR', value:ads.ctr.toFixed(2)+'%', color:'#10b981' }),
+      React.createElement(StatCard, { label:'CPC', value:'£'+ads.cpc.toFixed(2), color:'#9f84b2' }),
+      React.createElement(StatCard, { label:'ROAS', value:ads.roas!=null ? ads.roas+'x' : '—', color:'#10b981' }),
+    ),
+    React.createElement('div', { style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',padding:'18px 20px 10px',border:'1px solid rgba(255,255,255,0.06)'} },
+      React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:6} }, 'Ad Spend Per Day'),
+      React.createElement(SpendPerDayChart, { series:ads.dailySeries })
+    )
+  );
+}
+
+// Ad spend comes from the whole Meta ad account, so an event's spend is defined by the dates its campaign ran.
+function AdsRangeEditor({ eventId, since, until, onSaved }) {
+  const [from, setFrom] = useState(since || '');
+  const [to, setTo] = useState(until || '');
+  const [state, setState] = useState('idle'); // idle | saving | saved | error
+  useEffect(() => { setFrom(since || ''); setTo(until || ''); setState('idle'); }, [eventId, since, until]);
+  const inputStyle = {...FS,background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.15)',color:'#fff',padding:'5px 8px',fontSize:12,colorScheme:'dark'};
+  const save = () => {
+    setState('saving');
+    window.RNTECH_API.updateAdsRange(eventId, from, to)
+      .then(() => { setState('saved'); onSaved(); })
+      .catch(() => setState('error'));
+  };
+  return React.createElement('div', { style:{ display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',marginBottom:20 } },
+    React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase'} }, 'Ad spend counted from'),
+    React.createElement('input', { type:'date', value:from, onChange:e=>{setFrom(e.target.value);setState('idle');}, style:inputStyle }),
+    React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11} }, 'to'),
+    React.createElement('input', { type:'date', value:to, onChange:e=>{setTo(e.target.value);setState('idle');}, style:inputStyle }),
+    React.createElement('button', { onClick:save, disabled:state==='saving', style:{...FS,padding:'5px 12px',border:'1px solid rgba(255,255,255,0.15)',background:'transparent',color:'#fff',fontSize:11,cursor:'pointer'} }, state==='saving'?'Saving…':'Save'),
+    state==='saved' && React.createElement('span', { style:{...FS,color:'#10b981',fontSize:11} }, 'Saved'),
+    state==='error' && React.createElement('span', { style:{...FS,color:'#ef4444',fontSize:11} }, 'Failed to save — try again'),
+    !from && !to && React.createElement('span', { style:{...FS,color:'rgba(245,158,11,0.7)',fontSize:11} }, 'No dates set — all account ad spend in the window is counted against this event')
+  );
+}
+
+function TabPayments() {
+  const [days, setDays] = useState(30);
+  const [events, setEvents] = useState([]);
+  // undefined = event list not loaded yet (don't fetch or allow edits); null = "All Events" once determined.
+  const [selectedEventId, setSelectedEventId] = useState(undefined);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    window.RNTECH_API.getEvents()
+      .then(ev => { setEvents(ev); setSelectedEventId(ev.length ? nextUpcomingId(ev) : null); })
+      .catch(() => setSelectedEventId(null));
+  }, []);
+
+  useEffect(() => {
+    if (selectedEventId === undefined) return; // event filter not settled yet — avoid fetching/editing against the wrong scope
+    setLoading(true);
+    window.RNTECH_API.getPaymentsOverview(days, selectedEventId).then(d => { setData(d); setLoading(false); }).catch(()=>setLoading(false));
+  }, [days, selectedEventId, reloadKey]);
+
+  const [djSpendError, setDjSpendError] = useState(false);
+  const saveDjSpend = (pence) => {
+    setDjSpendError(false);
+    window.RNTECH_API.updateDjSpend(pence, selectedEventId).then(() => {
+      setData(d => d ? { ...d, djSpendPence:pence, profitPence: (d.stripe.available || d.cashRevenuePence) ? (d.netRevenuePence - pence - d.adSpendPence) : null } : d);
+    }).catch(() => setDjSpendError(true));
+  };
+
+  const [cashError, setCashError] = useState(false);
+  const addCash = (pence) => {
+    setCashError(false);
+    window.RNTECH_API.addCashRevenue(pence, selectedEventId).then(({ cashRevenuePence }) => {
+      setData(d => {
+        if (!d) return d;
+        const netRevenuePence = (d.stripe.available ? d.stripe.netPence : 0) + cashRevenuePence;
+        return { ...d, cashRevenuePence, netRevenuePence, profitPence: netRevenuePence - d.djSpendPence - d.adSpendPence };
+      });
+    }).catch(() => setCashError(true));
+  };
+
+  return React.createElement('div', { style:{ marginBottom:40 } },
+    React.createElement(ProfitTargets, {
+      loading, profitPence: data ? data.profitPence : null,
+      goalPence:PROFIT_GOAL_PENCE, stretchGoalPence:PROFIT_STRETCH_GOAL_PENCE,
+      events, selectedEventId, onChangeEvent:setSelectedEventId,
+    }),
+    React.createElement('div', { style:{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:12 } },
+      React.createElement('h3', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',margin:0} }, 'Payments'),
+      React.createElement('div', { style:{ display:'flex',gap:6 } },
+        [7,30,90].map(n => React.createElement('button', { key:n, onClick:()=>setDays(n), style:{...FS,padding:'5px 12px',border:`1px solid ${days===n?'#3272a8':'rgba(255,255,255,0.15)'}`,background:days===n?'rgba(50,114,168,0.2)':'transparent',color:days===n?'#fff':'rgba(255,255,255,0.5)',fontSize:11,fontWeight:700,cursor:'pointer'} }, n+'D'))
+      )
+    ),
+    loading || !data
+      ? React.createElement(Spinner)
+      : React.createElement('div', null,
+          React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16,marginBottom:20} },
+            React.createElement(StatCard, { label:selectedEventId ? 'Tickets Sold (Event)' : 'Tickets Sold (All Time)', value:data.ticketsSoldTotal, color:'#10b981' }),
+            React.createElement(StatCard, { label:`Gross Revenue (${data.periodDays}D)`, value:gbp(data.dailySeries.reduce((s,d)=>s+d.revenuePence,0)), color:'#3272a8' }),
+            data.stripe.available
+              ? React.createElement(StatCard, { label:`Stripe Fees (${data.periodDays}D)`, value:gbp(data.stripe.feePence), color:'#f59e0b' })
+              : React.createElement(StatCard, { label:'Stripe Fees', value:'—', color:'#f59e0b' }),
+            React.createElement(AddCashStat, { label:`Net Revenue (${data.periodDays}D)`, pence:data.netRevenuePence, onAdd:addCash }),
+            React.createElement(EditableStat, { label:selectedEventId ? 'DJ Spend (Event)' : 'DJ Spend (All Events)', pence:data.djSpendPence, onSave:saveDjSpend }),
+            (() => {
+              const tier = profitTier(data.profitPence, data.targets.goalPence, data.targets.stretchGoalPence);
+              const shimmer = tier==='gold' ? GOLD_SHIMMER : tier==='platinum' ? PLATINUM_SHIMMER : null;
+              const color = tier==='loss' ? '#ef4444' : '#10b981';
+              return React.createElement(StatCard, {
+                label:`Profit (${data.periodDays}D)`,
+                value: data.profitPence!=null ? gbp(data.profitPence) : '—',
+                color, shimmer,
+              });
+            })(),
+          ),
+          djSpendError && React.createElement('p', { style:{...FS,color:'#ef4444',fontSize:11,marginBottom:20} }, 'DJ Spend failed to save — try again (check you\'re still signed in).'),
+          cashError && React.createElement('p', { style:{...FS,color:'#ef4444',fontSize:11,marginBottom:20} }, 'Cash amount failed to save — try again (check you\'re still signed in).'),
+          !data.stripe.available && React.createElement('p', { style:{...FS,color:'rgba(245,158,11,0.7)',fontSize:11,marginBottom:20} }, 'Stripe fee data unavailable — check STRIPE_SECRET_KEY is configured.'),
+          data.profitPence!=null && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)',fontSize:11,marginBottom:20} },
+            `Profit = Net Revenue ${gbp(data.netRevenuePence)} (Stripe ${gbp(data.stripe.available?data.stripe.netPence:0)} + Cash ${gbp(data.cashRevenuePence)}) − DJ Spend ${gbp(data.djSpendPence)} − Ad Spend ${gbp(data.adSpendPence)}`),
+          React.createElement('div', { style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',padding:'18px 20px 10px',border:'1px solid rgba(255,255,255,0.06)'} },
+            React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:6} }, 'Tickets Sold Per Day'),
+            React.createElement(TicketsPerDayChart, { series:data.dailySeries })
+          ),
+          selectedEventId && React.createElement(AdsRangeEditor, { eventId:selectedEventId, since:data.adsSince, until:data.adsUntil, onSaved:()=>setReloadKey(k=>k+1) }),
+          React.createElement(MetaAdsSection, { days:data.periodDays, eventId:selectedEventId })
+        )
+  );
+}
+
+// Push-notification opt-in for ticket sale alerts — explicit, admin-panel-only, never auto-prompted for site visitors.
+// A cached "optedIn" flag can survive even when no real push subscription was ever created
+// (e.g. from an earlier attempt before a server-side fix) — only trust it alongside a real subscription id.
+function isReallySubscribed(OneSignal) {
+  return !!(OneSignal.User.PushSubscription.optedIn && OneSignal.User.PushSubscription.id);
+}
+
+function SaleNotifications() {
+  const [status, setStatus] = useState('checking'); // checking | off | on | error
+
+  useEffect(() => {
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(async (OneSignal) => {
+      try { setStatus(isReallySubscribed(OneSignal) ? 'on' : 'off'); }
+      catch (e) { setStatus('error'); }
+    });
+  }, []);
+
+  const enable = () => {
+    setStatus('checking');
+    // Use OneSignal's own Slidedown prompt UI rather than driving Notifications.requestPermission()/
+    // PushSubscription.optIn() by hand — it owns the whole permission+subscribe flow internally and
+    // is what actually works reliably across browsers (confirmed working this way on TattLab/InkinStudioz).
+    window.OneSignalDeferred.push(async (OneSignal) => {
+      try {
+        await OneSignal.Slidedown.promptPush();
+        await new Promise(r => setTimeout(r, 1500)); // give the SDK a moment to actually register the subscription
+        if (isReallySubscribed(OneSignal)) {
+          await OneSignal.User.addTag('role', 'admin');
+          setStatus('on');
+        } else {
+          setStatus('error');
+        }
+      } catch (e) { setStatus('error'); }
+    });
+  };
+
+  if (status === 'on') {
+    return React.createElement('div', { style:{...FS,color:'#10b981',fontSize:11,marginBottom:24} }, '🔔 Sale notifications enabled on this device');
+  }
+  return React.createElement('div', { style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',border:'1px solid rgba(255,255,255,0.06)',padding:'14px 18px',marginBottom:24,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:12} },
+    React.createElement('div', { style:{...FS,fontSize:12,color:'rgba(255,255,255,0.6)'} },
+      status==='error' ? '🔔 Subscription failed — fully close and reopen the app, then try again' : '🔔 Get a push notification on this device whenever a ticket sells'),
+    React.createElement('button', {
+      onClick:enable, disabled:status==='checking',
+      style:{...FS,padding:'8px 16px',border:'1px solid #3272a8',background:'rgba(50,114,168,0.2)',color:'#fff',fontSize:11,fontWeight:700,cursor:'pointer',textTransform:'uppercase',letterSpacing:'0.05em'}
+    }, status==='checking' ? 'Checking…' : 'Enable Notifications')
+  );
+}
+
 function TabOverview() {
   const [stats, setStats] = useState(null);
   useEffect(() => { window.RNTECH_API.getStats().then(setStats).catch(()=>{}); }, []);
   if (!stats) return React.createElement(Spinner);
   return React.createElement('div', null,
+    React.createElement(SaleNotifications),
     React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16,marginBottom:40} },
       React.createElement(StatCard, { label:'Events', value:stats.events, color:'#3272a8' }),
       React.createElement(StatCard, { label:'Tickets Issued', value:stats.tickets, color:'#10b981' }),
@@ -98,6 +535,7 @@ function TabOverview() {
       React.createElement(StatCard, { label:'Active Mixes', value:stats.mixes, color:'#9f84b2' }),
       React.createElement(StatCard, { label:'Email Subscribers', value:stats.subscribers, color:'#10b981' }),
     ),
+    React.createElement(TabPayments),
     React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)',fontSize:13} },
       'Use the tabs above to manage events, mixes, tickets, attendees, and email campaigns.')
   );
@@ -135,7 +573,7 @@ function TabEvents() {
       startTime:ev.startTime, endTime:ev.endTime||'', venue:ev.venue, location:ev.location,
       description:ev.description||'',
       ticketBio:ev.ticketBio||'',
-      lineup:(ev.lineup||[]).map(l=>l.name+(l.role?':'+l.role:'')).join('\n'),
+      lineup:(ev.lineup||[]).map(l=>l.name+(l.role||l.instagram?':'+(l.role||''):'')+(l.instagram?':'+l.instagram:'')).join('\n'),
       giveaways:(ev.giveaways||[]).join('\n'),
       status:ev.status, isFree:ev.isFree, featured:ev.featured,
       registrationMode:ev.registrationMode||'open',
@@ -149,8 +587,11 @@ function TabEvents() {
     e.preventDefault();
     setSaving(true);
     const lineup = form.lineup.split('\n').filter(Boolean).map(l=>{
-      const [name,...rest]=l.split(':');
-      return { name:name.trim(), role:rest.join(':').trim()||'Support' };
+      const [name,role,instagram]=l.split(':');
+      const entry = { name:(name||'').trim(), role:(role||'').trim()||'Support' };
+      const handle = (instagram||'').trim().replace(/^@/,'');
+      if (handle) entry.instagram = handle;
+      return entry;
     });
     const giveaways = form.giveaways.split('\n').filter(Boolean).map(g=>g.trim());
     const payload = { ...form, lineup, giveaways };
@@ -172,7 +613,7 @@ function TabEvents() {
     load();
   };
 
-  const blankTtForm = () => ({ name:'',pricePounds:'0',capacity:100,description:'',active:true,isTiered:false,tiers:[{capacity:100,pricePounds:'0'}] });
+  const blankTtForm = () => ({ name:'',pricePounds:'0',capacity:100,description:'',active:true,soldOut:false,nearlyGone:false,isTiered:false,tiers:[{capacity:100,pricePounds:'0'}] });
 
   const openTicketTypes = async (ev) => {
     setSelectedEvent(ev);
@@ -189,6 +630,8 @@ function TabEvents() {
       capacity: tt.capacity,
       description: tt.description||'',
       active: tt.active,
+      soldOut: tt.soldOut||false,
+      nearlyGone: tt.nearlyGone||false,
       isTiered: tt.isTiered||false,
       tiers: tt.isTiered && tt.tiers && tt.tiers.length
         ? tt.tiers.map(t=>({ capacity:t.capacity, pricePounds:(t.price_pence/100).toFixed(2) }))
@@ -197,7 +640,7 @@ function TabEvents() {
   };
 
   const buildTtPayload = () => {
-    const base = { eventId: selectedEvent.id, name: ttForm.name, description: ttForm.description, active: ttForm.active };
+    const base = { eventId: selectedEvent.id, name: ttForm.name, description: ttForm.description, active: ttForm.active, soldOut: ttForm.soldOut, nearlyGone: ttForm.nearlyGone };
     if (ttForm.isTiered) {
       return { ...base, isTiered:true, tiers: ttForm.tiers.map(t=>({ capacity:parseInt(t.capacity)||0, price_pence:Math.round(parseFloat(t.pricePounds||0)*100) })), price:0, capacity:0 };
     }
@@ -223,6 +666,11 @@ function TabEvents() {
     const data = await window.RNTECH_API.getEvent(selectedEvent.id).catch(()=>({ ticketTypes:[] }));
     setTicketTypes(data.ticketTypes||[]);
     if (editingTt && editingTt.id===id) { setEditingTt(null); setTtForm(blankTtForm()); }
+  };
+
+  const toggleSoldOut = async (tt) => {
+    await window.RNTECH_API.setTicketTypeSoldOut(tt.id, !tt.soldOut).catch(err=>alert(err.message));
+    setTicketTypes(list=>list.map(t=>t.id===tt.id?{...t,soldOut:!tt.soldOut}:t));
   };
 
   return React.createElement('div', null,
@@ -274,7 +722,7 @@ function TabEvents() {
           ),
           React.createElement('input', { type:'file',accept:'image/*',onChange:e=>setTicketBannerFile(e.target.files[0]),style:{...FS,color:'rgba(255,255,255,0.6)',fontSize:13} })
         ),
-        React.createElement(AdminTextarea, { label:'Lineup (one per line: NAME:Role)',value:form.lineup,onChange:e=>setForm(f=>({...f,lineup:e.target.value})),rows:4,placeholder:'DJ MIDDO:Headliner\nBEN HENDERSON:Headliner\nDJ DAGZ:Support' }),
+        React.createElement(AdminTextarea, { label:'Lineup (one per line: NAME:Role:Instagram — instagram optional)',value:form.lineup,onChange:e=>setForm(f=>({...f,lineup:e.target.value})),rows:4,placeholder:'DJ MIDDO:Headliner:djmiddo\nBEN HENDERSON:Headliner\nDJ DAGZ:Support:dagbeni10' }),
         React.createElement(AdminTextarea, { label:'Giveaways (one per line)',value:form.giveaways,onChange:e=>setForm(f=>({...f,giveaways:e.target.value})),rows:3,placeholder:'Free entry all night\nBrewtini sampling' }),
         React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14} },
           React.createElement(AdminSelect, { label:'Status',value:form.status,onChange:e=>setForm(f=>({...f,status:e.target.value})),options:[{value:'upcoming',label:'Upcoming'},{value:'past',label:'Past'}] }),
@@ -317,7 +765,11 @@ function TabEvents() {
       ticketTypes.length>0&&React.createElement('div', { style:{marginBottom:20} },
         ticketTypes.map(tt=>React.createElement('div', { key:tt.id,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 0',borderBottom:'1px solid rgba(255,255,255,0.06)',background:editingTt&&editingTt.id===tt.id?'rgba(50,114,168,0.08)':'transparent'} },
           React.createElement('div', null,
-            React.createElement('div', { style:{...FS,color:'#fff',fontWeight:700,fontSize:14} }, tt.name),
+            React.createElement('div', { style:{display:'flex',alignItems:'center',gap:8} },
+              React.createElement('div', { style:{...FS,color:'#fff',fontWeight:700,fontSize:14} }, tt.name),
+              tt.nearlyGone&&!tt.soldOut&&React.createElement('span', { style:{...FS,color:'#f59e0b',fontSize:10,fontWeight:800,letterSpacing:'0.06em',border:'1px solid rgba(245,158,11,0.4)',padding:'2px 7px'} },'NEARLY GONE'),
+              tt.soldOut&&React.createElement('span', { style:{...FS,color:'#ef4444',fontSize:10,fontWeight:800,letterSpacing:'0.06em',border:'1px solid rgba(239,68,68,0.4)',padding:'2px 7px'} },'SOLD OUT')
+            ),
             React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12} },
               (tt.isTiered
                 ? 'Tiered · '+tt.tiers.map((t,i)=>'T'+(i+1)+': £'+(t.price_pence/100).toFixed(2)).join(' → ')
@@ -326,6 +778,7 @@ function TabEvents() {
             )
           ),
           React.createElement('div', { style:{display:'flex',gap:6} },
+            React.createElement(GlowButton, { small:true,variant:tt.soldOut?'ghost':'danger',onClick:()=>toggleSoldOut(tt) }, tt.soldOut?'Unmark Sold Out':'Mark Sold Out'),
             React.createElement(GlowButton, { small:true,variant:'ghost',onClick:()=>openEditTt(tt) },'Edit'),
             React.createElement(GlowButton, { small:true,variant:'danger',onClick:()=>delTicketType(tt.id) },'Remove')
           )
@@ -355,6 +808,16 @@ function TabEvents() {
             ttForm.tiers.length>1&&React.createElement('button', { type:'button',onClick:()=>setTtForm(f=>({...f,tiers:f.tiers.filter((_,j)=>j!==i)})),style:{...FS,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',cursor:'pointer',padding:'8px 10px',fontSize:12,fontWeight:700} },'✕')
           )),
           React.createElement('button', { type:'button',onClick:()=>setTtForm(f=>({...f,tiers:[...f.tiers,{capacity:100,pricePounds:'0'}]})),style:{...FS,background:'rgba(50,114,168,0.1)',border:'1px solid rgba(50,114,168,0.3)',color:'#3272a8',cursor:'pointer',padding:'6px 14px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} },'+ Add Tier')
+        ),
+        React.createElement('div', { style:{display:'flex',alignItems:'center',gap:24,marginBottom:14,flexWrap:'wrap'} },
+          React.createElement('div', { style:{display:'flex',alignItems:'center',gap:10} },
+            React.createElement('input', { type:'checkbox',id:'ttNearlyGone',checked:!!ttForm.nearlyGone,onChange:e=>setTtForm(f=>({...f,nearlyGone:e.target.checked})),style:{cursor:'pointer',width:16,height:16} }),
+            React.createElement('label', { htmlFor:'ttNearlyGone',style:{...FS,color:'rgba(255,255,255,0.7)',fontSize:13,cursor:'pointer'} },'Nearly Gone (shows a label on the buy screen)')
+          ),
+          React.createElement('div', { style:{display:'flex',alignItems:'center',gap:10} },
+            React.createElement('input', { type:'checkbox',id:'ttSoldOut',checked:!!ttForm.soldOut,onChange:e=>setTtForm(f=>({...f,soldOut:e.target.checked})),style:{cursor:'pointer',width:16,height:16} }),
+            React.createElement('label', { htmlFor:'ttSoldOut',style:{...FS,color:'rgba(255,255,255,0.7)',fontSize:13,cursor:'pointer'} },'Sold Out')
+          )
         ),
         React.createElement(AdminInput, { label:'Description (optional)',value:ttForm.description,onChange:e=>setTtForm(f=>({...f,description:e.target.value})) }),
         React.createElement('div', { style:{display:'flex',gap:8} },
@@ -475,7 +938,7 @@ function TabMixes() {
 }
 
 // ── QR Scanner Modal ──────────────────────────────────────────────────────────
-function QRScanModal({ onClose, onScan }) {
+function QRScanModal({ onClose, onScan, eventId }) {
   const videoRef = React.useRef(null);
   const canvasRef = React.useRef(null);
   const scanCanvasRef = React.useRef(null);
@@ -484,6 +947,25 @@ function QRScanModal({ onClose, onScan }) {
   const doneRef = React.useRef(false);
   const [error, setError] = React.useState('');
   const [scanning, setScanning] = React.useState(false);
+
+  // Manual search fallback — camera scanning fails often enough in the field (bad light,
+  // cracked screens, no camera permission) that staff need a reliable way to check someone
+  // in by typing their name/email instead of fighting the QR reader.
+  const [manualQuery, setManualQuery] = React.useState('');
+  const [manualResults, setManualResults] = React.useState([]);
+  const [manualLoading, setManualLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    const q = manualQuery.trim();
+    if (q.length < 2) { setManualResults([]); return; }
+    setManualLoading(true);
+    const timer = setTimeout(() => {
+      window.RNTECH_API.searchTickets(q, eventId)
+        .then(r => { setManualResults(r.slice(0, 8)); setManualLoading(false); })
+        .catch(() => setManualLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [manualQuery, eventId]);
 
   React.useEffect(() => {
     if (typeof jsQR === 'undefined') { setError('QR scanner library not loaded.'); return; }
@@ -558,6 +1040,38 @@ function QRScanModal({ onClose, onScan }) {
     error && React.createElement('p', { style:{...FS,color:'#ef4444',fontSize:13,marginTop:16,textAlign:'center',maxWidth:300} }, error),
     !scanning && !error && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13,marginTop:16} }, 'Starting camera…'),
     scanning && !error && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13,marginTop:16} }, 'Point at QR code on ticket'),
+
+    // Manual search fallback
+    React.createElement('div', { style:{width:'100%',maxWidth:420,marginTop:24,padding:'0 16px',boxSizing:'border-box'} },
+      React.createElement('div', { style:{display:'flex',alignItems:'center',gap:10,margin:'0 0 12px'} },
+        React.createElement('div', { style:{flex:1,height:1,background:'rgba(255,255,255,0.12)'} }),
+        React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.35)',fontSize:11,letterSpacing:'0.08em',textTransform:'uppercase'} }, 'Or search instead'),
+        React.createElement('div', { style:{flex:1,height:1,background:'rgba(255,255,255,0.12)'} })
+      ),
+      React.createElement('input', {
+        placeholder:'Search name or email…', value:manualQuery, onChange:e=>setManualQuery(e.target.value),
+        style:{...inputSt,width:'100%',boxSizing:'border-box',marginBottom:manualQuery.trim().length>=2?10:0}
+      }),
+      manualLoading && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12,textAlign:'center'} }, 'Searching…'),
+      !manualLoading && manualQuery.trim().length>=2 && manualResults.length===0 &&
+        React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12,textAlign:'center'} }, 'No matches.'),
+      !manualLoading && manualResults.map(t => React.createElement('div', {
+        key:t.id,
+        style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,padding:'10px 12px',marginBottom:6,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)'}
+      },
+        React.createElement('div', { style:{minWidth:0} },
+          React.createElement('div', { style:{...FS,color:'#fff',fontSize:13,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'} }, t.holderName),
+          React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'} }, t.ticketTypeName+' · '+t.holderEmail)
+        ),
+        t.status==='valid'
+          ? React.createElement('button', {
+              onClick:()=>onScan(t.qrCode),
+              style:{...FS,flexShrink:0,background:'rgba(16,185,129,0.15)',border:'1px solid rgba(16,185,129,0.4)',color:'#10b981',fontSize:11,fontWeight:800,padding:'6px 12px',cursor:'pointer',textTransform:'uppercase'}
+            }, 'Mark Entered')
+          : React.createElement('span', { style:{...FS,flexShrink:0,color:'rgba(255,255,255,0.35)',fontSize:11,fontWeight:700,textTransform:'uppercase'} }, t.status==='used' ? '✓ Entered' : t.status)
+      ))
+    ),
+
     React.createElement('div', { style:{marginTop:20} },
       React.createElement(GlowButton, {
         onClick:()=>{
@@ -648,6 +1162,7 @@ function TabGuestList() {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // all | used | valid
   const [showAdd, setShowAdd] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [scanResult, setScanResult] = useState(null);
@@ -704,9 +1219,12 @@ function TabGuestList() {
   };
 
   const scanCount = tickets.filter(t => t.status === 'used').length;
+  const notScannedCount = tickets.filter(t => t.status === 'valid').length;
   const selectedEvent = events.find(e=>e.id===selectedId);
   const ticketTypes = selectedEvent ? (selectedEvent.ticketTypes||[]).filter(t=>t.active) : [];
-  const filtered = tickets.filter(t => !search || t.holderName.toLowerCase().includes(search.toLowerCase()) || t.holderEmail.toLowerCase().includes(search.toLowerCase()));
+  const filtered = tickets
+    .filter(t => !search || t.holderName.toLowerCase().includes(search.toLowerCase()) || t.holderEmail.toLowerCase().includes(search.toLowerCase()))
+    .filter(t => statusFilter==='all' || t.status===statusFilter);
 
   const btnStyle = { ...FS,background:'rgba(100,116,139,0.2)',border:'1px solid rgba(100,116,139,0.3)',color:'#94a3b8',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em' };
   const btnGreenStyle = { ...FS,background:'rgba(16,185,129,0.1)',border:'1px solid rgba(16,185,129,0.3)',color:'#10b981',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em' };
@@ -725,16 +1243,22 @@ function TabGuestList() {
         events.map(ev=>React.createElement('option', { key:ev.id,value:ev.id,style:{background:'#040c18'} }, ev.title))
       ),
       React.createElement('input', { placeholder:'Search name or email…',value:search,onChange:e=>setSearch(e.target.value),style:{...inputSt,width:200,marginBottom:0} }),
+      React.createElement('select', { value:statusFilter, onChange:e=>setStatusFilter(e.target.value), style:{...inputSt,width:'auto',marginBottom:0} },
+        React.createElement('option', { value:'all',style:{background:'#040c18'} }, 'All'),
+        React.createElement('option', { value:'used',style:{background:'#040c18'} }, 'Scanned In'),
+        React.createElement('option', { value:'valid',style:{background:'#040c18'} }, 'Never Scanned')
+      ),
       React.createElement(GlowButton, { onClick:()=>{setAddError('');setShowAdd(true);},small:true }, '+ Add Guest'),
       React.createElement(GlowButton, { onClick:()=>{setScanResult(null);setShowScanner(true);},small:true,variant:'ghost' }, '⬜ Scan QR'),
       React.createElement('a', { href:window.RNTECH_API.exportTickets(selectedId)+'&token='+window.RNTECH_AUTH.getToken(), download:'guest-list.csv', style:{...FS,color:'#3272a8',fontSize:13,fontWeight:700,letterSpacing:'0.06em',textTransform:'uppercase',textDecoration:'none',border:'1px solid rgba(50,114,168,0.4)',padding:'8px 16px'} }, '⬇ Export CSV'),
-      React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13} }, tickets.length+' attendees'),
+      React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13} },
+        tickets.length+' attendees · '+scanCount+' scanned in · '+notScannedCount+' never scanned'),
       React.createElement(GenderCounter, { tickets, overrides:genderOverrides, onClickUnknown:()=>setShowGenderResolve(true) })
     ),
 
     // Table
     loading && React.createElement(Spinner),
-    !loading && filtered.length===0 && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)'} }, search ? 'No results for "'+search+'".' : 'No registrations yet.'),
+    !loading && filtered.length===0 && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)'} }, (search||statusFilter!=='all') ? 'No matches for this filter.' : 'No registrations yet.'),
     !loading && filtered.length>0 && React.createElement('div', { style:{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.08)',overflow:'hidden'} },
       React.createElement('table', { style:{width:'100%',borderCollapse:'collapse'} },
         React.createElement('thead', null,
@@ -782,7 +1306,7 @@ function TabGuestList() {
     ),
 
     // QR Scanner
-    showScanner && React.createElement(QRScanModal, { onClose:()=>setShowScanner(false), onScan:handleScan }),
+    showScanner && React.createElement(QRScanModal, { onClose:()=>setShowScanner(false), onScan:handleScan, eventId:selectedId }),
     showGenderResolve && React.createElement(GenderResolveModal, { tickets, overrides:genderOverrides, onSave:setGenderOverrides, onClose:()=>setShowGenderResolve(false) }),
 
     // Scan Result Card
@@ -989,16 +1513,394 @@ function TabMessages() {
 }
 
 // ── Email Campaigns ───────────────────────────────────────────────────────────
+// ── Email sending dashboard (live) ────────────────────────────────────────────
+const HEALTH_STYLE = {
+  ok:      { color:'#10b981', label:'Healthy' },
+  idle:    { color:'#64748b', label:'Idle' },
+  warning: { color:'#f59e0b', label:'Warning' },
+  blocked: { color:'#ef4444', label:'Possibly blocked' },
+};
+const SEND_STATUS_STYLE = {
+  draft:     { color:'#64748b', label:'Draft' },
+  queued:    { color:'#9f84b2', label:'Queued' },
+  running:   { color:'#10b981', label:'Sending' },
+  paused:    { color:'#f59e0b', label:'Paused' },
+  completed: { color:'#3272a8', label:'Completed' },
+};
+
+function fmtAgo(iso, nowMs) {
+  if (!iso) return '—';
+  const s = Math.max(0, Math.round((nowMs - new Date(iso).getTime()) / 1000));
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+function fmtIn(iso, nowMs) {
+  if (!iso) return '—';
+  const s = Math.round((new Date(iso).getTime() - nowMs) / 1000);
+  if (s <= 0) return 'due now';
+  return 'in ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+function fmtWhen(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+
+const AUD_RANK = { event_attended:0, event_no_show:1, event_buyers:2, everyone_else:3, all_subscribers:3 };
+
+function audienceLabel(c) {
+  const ev = c.audienceEventTitle || 'event';
+  if (c.audience === 'event_attended') return 'Scanned in · ' + ev;
+  if (c.audience === 'event_no_show') return 'Bought, never scanned in · ' + ev;
+  if (c.audience === 'event_buyers') return 'Ticket buyers · ' + ev;
+  if (c.audience === 'everyone_else') return 'Everyone else';
+  if (c.audience === 'all_subscribers') return 'All subscribers';
+  return 'Signup drip';
+}
+
+// Preview every draft in a round side by side, then queue them all in order.
+function RoundPlanModal({ plan, onClose, onQueue, busy }) {
+  const [tab, setTab] = useState(0);
+  const [showRecipients, setShowRecipients] = useState(false);
+  const [startAt, setStartAt] = useState('');
+  const c = plan.campaigns[tab];
+  const th = { ...FS, textAlign:'left', color:'rgba(255,255,255,0.4)', fontSize:10, letterSpacing:'0.1em', textTransform:'uppercase', padding:'6px 10px 6px 0', fontWeight:600 };
+  const td = { ...FS, color:'rgba(255,255,255,0.75)', fontSize:12, padding:'6px 10px 6px 0', borderTop:'1px solid rgba(255,255,255,0.05)' };
+  const drafts = plan.campaigns.filter(x => x.sendStatus === 'draft').length;
+  return React.createElement(Modal, { title:'Round: ' + plan.round, onClose },
+    React.createElement('div', { style:{ ...FS, fontSize:13, color:'rgba(255,255,255,0.8)', lineHeight:1.6, marginBottom:12 } },
+      React.createElement('b', { style:{ color:'#fff' } }, plan.totalPeople + ' people'), ' across ' + plan.campaigns.length + ' campaigns, sent one after another in this order. ',
+      plan.overlaps === 0
+        ? React.createElement('span', { style:{ color:'#10b981' } }, 'Nobody is in more than one campaign ✓ ')
+        : React.createElement('span', { style:{ color:'#ef4444', fontWeight:700 } }, '⚠ ' + plan.overlaps + ' people appear twice! '),
+      plan.unsubscribed + ' unsubscribed people are excluded. Roughly ' + plan.estTotalDays + ' day(s) in total at your pace.',
+      plan.subscribedNotCovered > 0 && React.createElement('div', { style:{ color:'#f59e0b' } }, plan.subscribedNotCovered + ' subscribed people aren\'t in any campaign (there\'s no "everyone else" campaign to catch them).')
+    ),
+    React.createElement('div', { style:{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:12 } },
+      plan.campaigns.map((x, i) => React.createElement('button', { key:x.id, onClick:() => { setTab(i); setShowRecipients(false); }, style:{ ...FS, padding:'7px 12px', cursor:'pointer', fontSize:12, fontWeight:700, border:`1px solid ${i===tab?'#3272a8':'rgba(255,255,255,0.15)'}`, background:i===tab?'rgba(50,114,168,0.25)':'transparent', color:i===tab?'#fff':'rgba(255,255,255,0.6)' } },
+        (i + 1) + ' · ' + x.name + ' (' + x.audienceSize + ')'))
+    ),
+    c && React.createElement('div', null,
+      React.createElement('div', { style:{ ...FS, color:'#9f84b2', fontSize:12, marginBottom:4 } }, 'Goes to: ' + c.reason + ' — ' + c.audienceSize + ' people, about ' + c.estDays + ' day(s)'),
+      React.createElement('div', { style:{ ...FS, color:'#fff', fontSize:14, fontWeight:700, marginBottom:8 } }, 'Subject: ' + c.subject),
+      React.createElement('iframe', { title:'Email preview', srcDoc:'<body style="margin:16px;background:#fff">' + c.html + '</body>', sandbox:'', style:{ width:'100%', height:400, border:'1px solid rgba(255,255,255,0.15)', background:'#fff' } }),
+      React.createElement('p', { style:{ ...FS, color:'rgba(255,255,255,0.4)', fontSize:11, margin:'6px 0 10px' } }, 'Shown with the name "' + c.sampleName + '" — every recipient gets their own first name.'),
+      React.createElement('button', { onClick:() => setShowRecipients(v => !v), style:{ ...FS, background:'transparent', border:'1px solid rgba(50,114,168,0.3)', color:'rgba(255,255,255,0.6)', cursor:'pointer', padding:'5px 12px', fontSize:11, fontWeight:700, textTransform:'uppercase', marginBottom:10 } }, showRecipients ? 'Hide recipients' : 'Show all ' + c.audienceSize + ' recipients'),
+      showRecipients && React.createElement('div', { style:{ maxHeight:220, overflow:'auto', marginBottom:10 } },
+        React.createElement('table', { style:{ width:'100%', borderCollapse:'collapse' } },
+          React.createElement('thead', null, React.createElement('tr', null, ['Name','Email','Went to'].map(h => React.createElement('th', { key:h, style:th }, h)))),
+          React.createElement('tbody', null, c.recipients.map((r, i) => React.createElement('tr', { key:i }, React.createElement('td', { style:td }, r.name), React.createElement('td', { style:td }, r.email), React.createElement('td', { style:td }, r.events))))
+        )
+      )
+    ),
+    drafts > 0 && React.createElement('div', { style:{ borderTop:'1px solid rgba(255,255,255,0.1)', paddingTop:14, marginTop:6, display:'flex', gap:12, alignItems:'center', flexWrap:'wrap' } },
+      React.createElement('label', { style:{ ...FS, color:'rgba(255,255,255,0.5)', fontSize:11, letterSpacing:'0.08em', textTransform:'uppercase' } }, 'Don\'t start before (optional)'),
+      React.createElement('input', { type:'datetime-local', value:startAt, onChange:e => setStartAt(e.target.value), style:{ ...FS, background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', padding:'6px 8px', fontSize:12, colorScheme:'dark' } }),
+      React.createElement(GlowButton, { onClick:() => onQueue(startAt ? new Date(startAt).toISOString() : null), disabled:busy }, busy ? 'Queueing…' : 'Queue all ' + drafts + ' in order')
+    ),
+    drafts === 0 && React.createElement('p', { style:{ ...FS, color:'rgba(255,255,255,0.4)', fontSize:12 } }, 'Nothing left in draft — every campaign in this round is already queued or sending.')
+  );
+}
+
+function sendEta(c) {
+  const perDay = Math.max(1, Math.min(c.dailyCap, Math.floor(((c.windowEndHour - c.windowStartHour) * 60) / Math.max(c.gapMinutes, 1))));
+  return Math.max(1, Math.ceil(c.audienceSize / perDay));
+}
+
+// Overall progress across every campaign in a round — since they run one after another sharing one
+// daily cap, this is the one number that answers "how far through is this whole thing, and when finishes".
+function RoundProgress({ round, campaigns, onOpenPlan, busy, nowMs, onResume }) {
+  const total = campaigns.reduce((s, c) => s + c.audienceSize, 0);
+  const processed = campaigns.reduce((s, c) => s + c.counts.sent + c.counts.skipped + c.counts.failed, 0);
+  const pct = total ? Math.round((processed / total) * 100) : 0;
+  const remaining = Math.max(total - processed, 0);
+  const drafts = campaigns.filter(c => c.sendStatus === 'draft').length;
+  const running = campaigns.find(c => c.sendStatus === 'running');
+  const stopped = campaigns.find(c => c.sendStatus === 'paused');   // manually paused OR auto-paused (blocked)
+  const allDone = campaigns.length > 0 && campaigns.every(c => c.sendStatus === 'completed');
+  const nothingStarted = campaigns.every(c => c.sendStatus === 'draft');
+  const blocked = stopped && stopped.health === 'blocked';
+
+  // ETA from the pace of whichever campaign is driving sends right now (they're set the same across a round).
+  const pace = running || stopped || campaigns.find(c => c.sendStatus === 'queued') || campaigns[0];
+  const perDay = pace ? Math.max(1, Math.min(pace.dailyCap, Math.floor(((pace.windowEndHour - pace.windowStartHour) * 60) / Math.max(pace.gapMinutes, 1)))) : 30;
+  const daysLeft = remaining ? Math.ceil(remaining / perDay) : 0;
+  const finishEstimate = remaining ? new Date(nowMs + daysLeft * 86400000) : null;
+
+  const barColor = blocked ? '#ef4444' : stopped ? '#f59e0b' : allDone ? '#10b981' : 'linear-gradient(90deg,#3272a8,#10b981)';
+  const boxColor = blocked ? 'rgba(239,68,68,0.6)' : stopped ? 'rgba(245,158,11,0.5)' : 'rgba(50,114,168,0.25)';
+  const boxBg = blocked ? 'rgba(239,68,68,0.1)' : stopped ? 'rgba(245,158,11,0.08)' : 'rgba(50,114,168,0.08)';
+
+  return React.createElement('div', { style:{ background:boxBg, border:`1px solid ${boxColor}`, padding:'16px 18px', marginTop:20, marginBottom:2, transition:'background 0.4s,border-color 0.4s' } },
+    React.createElement('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8, marginBottom:10 } },
+      React.createElement('div', { style:{ ...FS, color:'#9f84b2', fontSize:12, fontWeight:800, letterSpacing:'0.12em', textTransform:'uppercase' } }, 'Round · ' + round + '  (' + campaigns.length + ' campaigns, sent one after another, nobody emailed twice)'),
+      React.createElement('div', { style:{ display:'flex', gap:8 } },
+        stopped && React.createElement(GlowButton, { small:true, variant:blocked?'danger':'primary', onClick:() => onResume(stopped.id), disabled:busy }, blocked ? '⟳ Restart Sending' : '▶ Resume Sending'),
+        React.createElement(GlowButton, { small:true, variant:'primary', onClick:onOpenPlan, disabled:busy }, drafts > 0 ? 'Preview All Drafts & Queue' : 'View Round Plan')
+      )
+    ),
+    stopped && React.createElement('div', { style:{ ...FS, fontSize:13, fontWeight:700, color:blocked?'#ef4444':'#f59e0b', marginBottom:8, display:'flex', alignItems:'center', gap:6 } },
+      React.createElement('span', { style:{ width:9, height:9, borderRadius:'50%', background:blocked?'#ef4444':'#f59e0b', display:'inline-block', flexShrink:0 } }),
+      (blocked ? '⚠ Stopped — ' : '⏸ Paused — ') + '"' + stopped.name + '": ' + stopped.healthMessage),
+    React.createElement('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:6 } },
+      React.createElement('span', { style:{ ...FS, fontSize:13, color:'rgba(255,255,255,0.6)' } },
+        nothingStarted ? total + ' people queued up across this round' : processed + ' of ' + total + ' people emailed'),
+      React.createElement('span', { style:{ ...FS, fontSize:22, fontWeight:800, color: allDone ? '#10b981' : stopped ? (blocked?'#ef4444':'#f59e0b') : '#fff' } }, pct + '%')
+    ),
+    React.createElement('div', { style:{ height:14, background:'rgba(255,255,255,0.08)', overflow:'hidden' } },
+      React.createElement('div', { style:{ height:'100%', width:pct+'%', background:barColor, transition:'width 0.6s ease, background 0.4s' } })
+    ),
+    React.createElement('p', { style:{ ...FS, fontSize:12, color:'rgba(255,255,255,0.45)', margin:'8px 0 0' } },
+      allDone ? 'Every campaign in this round has finished sending.'
+      : nothingStarted ? 'Nothing sent yet — queue this round to start.'
+      : stopped ? 'Sending is stopped until you press ' + (blocked ? 'Restart' : 'Resume') + ' above — nothing else will send in this round meanwhile.'
+      : remaining === 0 ? 'Finishing up…'
+      : `${remaining} left to email, about ${daysLeft} day${daysLeft===1?'':'s'} to go at this pace` + (finishEstimate ? ` — roughly done by ${finishEstimate.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'})}` : ''))
+  );
+}
+
+function EmailDashboard({ onEdit, onChanged }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [lastLoad, setLastLoad] = useState(0);
+  const [busy, setBusy] = useState('');
+  const [modal, setModal] = useState(null); // { kind:'preview'|'recipients', campaign, payload }
+
+  const load = () => window.RNTECH_API.getEmailDashboard()
+    .then(d => { setData(d); setError(''); setLastLoad(Date.now()); })
+    .catch(e => setError(e.message || 'Could not load the dashboard'));
+
+  useEffect(() => {
+    load();
+    const poll = setInterval(load, 10000);
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => { clearInterval(poll); clearInterval(tick); };
+  }, []);
+
+  const act = async (key, fn, after) => {
+    setBusy(key);
+    try { const r = await fn(); if (after) after(r); await load(); if (onChanged) onChanged(); }
+    catch (e) { alert(e.message); }
+    finally { setBusy(''); }
+  };
+
+  const start = (c) => {
+    if (!confirm(`Start sending "${c.name}" to ${c.audienceSize} people?\n\nOne email roughly every ${c.gapMinutes} min, max ${c.dailyCap}/day, between ${c.windowStartHour}:00 and ${c.windowEndHour}:00 UK time. That's about ${sendEta(c)} day(s). You can pause any time.`)) return;
+    act('start' + c.id, () => window.RNTECH_API.startCampaign(c.id));
+  };
+  const preview = (c) => act('prev' + c.id, () => window.RNTECH_API.previewCampaign(c.id), p => setModal({ kind:'preview', campaign:c, payload:p }));
+  const recipients = (c) => act('rec' + c.id, () => window.RNTECH_API.campaignRecipients(c.id), p => setModal({ kind:'recipients', campaign:c, payload:p }));
+  const test = (c) => {
+    if (!confirm('Send ONE test copy of this email to your own address?')) return;
+    act('test' + c.id, () => window.RNTECH_API.testCampaign(c.id), r => alert('Test email sent to ' + r.sentTo + ' — check that inbox (and spam).'));
+  };
+  const openPlan = (round) => act('plan' + round, () => window.RNTECH_API.getRoundPlan(round), p => setModal({ kind:'plan', payload:p }));
+  const queueRound = (round, startAt) => act('queueround', () => window.RNTECH_API.queueRound(round, startAt), r => { setModal(null); alert('Queued in order: ' + r.queued.join(' → ') + '.\n\nThe first one starts automatically' + (startAt ? ' at your chosen time' : ' now') + '; each next one starts when the one before it has finished.'); });
+  const queue = (c) => {
+    if (!confirm(`Queue "${c.name}"? It will start automatically once nothing else in round "${c.roundName}" is sending.`)) return;
+    act('queue' + c.id, () => window.RNTECH_API.queueCampaign(c.id));
+  };
+  const del = (c) => {
+    if (!confirm(`Delete "${c.name}"${c.counts.sent ? ' and its send history' : ''}?`)) return;
+    act('del' + c.id, () => window.RNTECH_API.deleteCampaign(c.id));
+  };
+
+  if (!data) return error
+    ? React.createElement('p', { style:{...FS,color:'#ef4444',fontSize:13,marginBottom:24} }, error)
+    : React.createElement(Spinner);
+
+  const card = { background:'rgba(5,18,44,0.92)', border:'1px solid rgba(50,114,168,0.2)', padding:'18px 20px' };
+  const th = { ...FS, textAlign:'left', color:'rgba(255,255,255,0.4)', fontSize:10, letterSpacing:'0.1em', textTransform:'uppercase', padding:'6px 10px 6px 0', fontWeight:600 };
+  const td = { ...FS, color:'rgba(255,255,255,0.75)', fontSize:12, padding:'6px 10px 6px 0', borderTop:'1px solid rgba(255,255,255,0.05)' };
+  const stale = lastLoad && nowMs - lastLoad > 25000;
+  const problems = data.campaigns.filter(c => c.health === 'blocked' || c.health === 'warning');
+  const sortedCampaigns = [...data.campaigns].sort((a, b) =>
+    a.roundName.localeCompare(b.roundName) || (AUD_RANK[a.audience] - AUD_RANK[b.audience]) || (a.queuePosition - b.queuePosition));
+  const allSent = data.campaigns.reduce((s, c) => s + c.counts.sent, 0);
+  const allOpened = data.campaigns.reduce((s, c) => s + c.counts.opened, 0);
+  const allBounced = data.campaigns.reduce((s, c) => s + c.counts.bounced, 0);
+  const allDelivered = data.campaigns.reduce((s, c) => s + c.counts.delivered, 0);
+
+  return React.createElement('div', { style:{ marginBottom:36 } },
+    React.createElement('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14, flexWrap:'wrap', gap:8 } },
+      React.createElement('h3', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',margin:0} }, 'Sending Dashboard'),
+      React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8 } },
+        React.createElement('span', { style:{ width:8, height:8, borderRadius:'50%', background:stale?'#ef4444':'#10b981', boxShadow:`0 0 8px ${stale?'#ef4444':'#10b981'}` } }),
+        React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11} }, stale ? 'Connection lost — retrying' : 'Live · updated ' + fmtAgo(new Date(lastLoad).toISOString(), nowMs))
+      )
+    ),
+    !data.smtpConfigured && React.createElement('p', { style:{...FS,color:'#f59e0b',fontSize:12,marginBottom:12} }, 'Email (SMTP) isn\'t configured on this server — sends are only logged, nothing is actually delivered.'),
+    problems.map(c => React.createElement('div', { key:'p'+c.id, style:{ background:c.health==='blocked'?'rgba(239,68,68,0.12)':'rgba(245,158,11,0.1)', border:`1px solid ${HEALTH_STYLE[c.health].color}`, padding:'12px 16px', marginBottom:12 } },
+      React.createElement('div', { style:{...FS,color:HEALTH_STYLE[c.health].color,fontWeight:800,fontSize:13,marginBottom:4} }, (c.health==='blocked'?'⚠ ':'')+ c.name + ' — ' + HEALTH_STYLE[c.health].label),
+      React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.75)',fontSize:12,lineHeight:1.5} }, c.healthMessage)
+    )),
+    React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16,marginBottom:20} },
+      React.createElement(StatCard, { label:'Sent Today', value:data.totals.sentToday, color:'#10b981' }),
+      React.createElement(StatCard, { label:'Sent Last Hour', value:data.totals.sentLastHour, color:'#06b6d4' }),
+      React.createElement(StatCard, { label:'Last Email Went Out', value:fmtAgo(data.totals.lastSentAt, nowMs), color:data.totals.lastSentAt?'#3272a8':'#64748b' }),
+      React.createElement(StatCard, { label:'Time Now (UK)', value:new Date(nowMs).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/London'}), color:'#9f84b2' }),
+      React.createElement(StatCard, { label:'Unsubscribed', value:data.totals.unsubscribed, color:data.totals.unsubscribed?'#f59e0b':'#64748b' }),
+      React.createElement(StatCard, { label:'Mailbox Limit Today', value:data.totals.mailboxSentToday+' / '+data.totals.mailboxBudget, color:data.totals.mailboxSentToday>=data.totals.mailboxBudget?'#f59e0b':'#3272a8' }),
+      React.createElement(StatCard, { label:'Opened (All Campaigns)', value:allOpened+(allSent?` · ${Math.round(allOpened/allSent*100)}%`:''), color:'#f59e0b' }),
+      React.createElement(StatCard, { label:'Bounced (All Campaigns)', value:allBounced, color:allBounced?'#ef4444':'#64748b' }),
+      React.createElement(StatCard, { label:'Delivered (All Campaigns)', value:allDelivered, color:'#06b6d4' }),
+    ),
+    data.campaigns.length === 0 && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13,marginBottom:20} }, 'No broadcast campaigns yet — create one with "+ New Broadcast" below.'),
+    React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:14, marginBottom:24 } },
+      sortedCampaigns.map((c, idx) => {
+        const firstOfRound = idx === 0 || sortedCampaigns[idx - 1].roundName !== c.roundName;
+        const roundDrafts = sortedCampaigns.filter(x => x.roundName === c.roundName && x.sendStatus === 'draft').length;
+        const hs = HEALTH_STYLE[c.health] || HEALTH_STYLE.idle;
+        const ss = SEND_STATUS_STYLE[c.sendStatus] || SEND_STATUS_STYLE.draft;
+        const k = c.counts;
+        const pct = c.audienceSize ? Math.round(((k.sent + k.skipped + k.failed) / c.audienceSize) * 100) : 0;
+        const b = (key, label, onClick, variant, extra) => React.createElement(GlowButton, { key, small:true, variant:variant||'ghost', onClick, disabled:!!busy, ...extra }, label);
+        const cardEl = React.createElement('div', { key:c.id, style:{...card, borderColor:c.health==='blocked'?'rgba(239,68,68,0.6)':'rgba(50,114,168,0.2)'} },
+          React.createElement('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:12, marginBottom:12 } },
+            React.createElement('div', { style:{ minWidth:0 } },
+              React.createElement('h3', { style:{...FS,fontWeight:800,fontSize:15,color:'#fff',margin:'0 0 4px'} }, c.name),
+              React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.5)',fontSize:13} }, 'Subject: ' + c.subject),
+              React.createElement('div', { style:{ display:'flex', gap:8, marginTop:8, flexWrap:'wrap' } },
+                React.createElement(Chip, { label:ss.label, color:ss.color }),
+                React.createElement(Chip, { label:hs.label, color:hs.color }),
+                React.createElement(Chip, { label:audienceLabel(c), color:'#9f84b2' }),
+                c.offerLabel && React.createElement(Chip, { label:'Personal link: ' + c.offerLabel, color:'#10b981' }),
+              )
+            ),
+            React.createElement('div', { style:{ display:'flex', gap:8, flexWrap:'wrap' } },
+              b('prev', 'Preview', () => preview(c)),
+              b('test', 'Send Test To Me', () => test(c)),
+              b('rec', 'Recipients', () => recipients(c)),
+              c.sendStatus === 'draft' && b('queue', 'Queue', () => queue(c), 'primary'),
+              c.sendStatus === 'draft' && b('start', 'Start Now', () => start(c)),
+              c.sendStatus === 'queued' && b('unqueue', 'Unqueue', () => act('unq' + c.id, () => window.RNTECH_API.unqueueCampaign(c.id))),
+              c.sendStatus === 'running' && b('pause', 'Pause', () => act('pause' + c.id, () => window.RNTECH_API.pauseCampaign(c.id)), 'danger'),
+              c.sendStatus === 'paused' && b('resume', 'Resume', () => act('resume' + c.id, () => window.RNTECH_API.resumeCampaign(c.id)), 'primary'),
+              k.failed > 0 && b('retry', 'Retry ' + k.failed + ' Failed', () => act('retry' + c.id, () => window.RNTECH_API.retryFailedSends(c.id))),
+              b('edit', 'Edit', () => onEdit(c)),
+              b('del', 'Delete', () => del(c), 'danger'),
+            )
+          ),
+          React.createElement('div', { style:{ ...FS, color:hs.color, fontSize:12, marginBottom:14, lineHeight:1.5 } }, c.healthMessage),
+          React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(120px,1fr))',gap:12,marginBottom:14} },
+            React.createElement(StatCard, { label:'In Audience', value:c.audienceSize, color:'#9f84b2' }),
+            React.createElement(StatCard, { label:'Sent (accepted)', value:k.sent, color:'#10b981' }),
+            React.createElement(StatCard, { label:'Delivered (est.)', value:k.delivered, color:'#06b6d4' }),
+            React.createElement(StatCard, { label:'Bounced', value:k.bounced, color:k.bounced?'#ef4444':'#64748b' }),
+            React.createElement(StatCard, { label:'Failed', value:k.failed, color:k.failed?'#ef4444':'#64748b' }),
+            React.createElement(StatCard, { label:'Opened (approx.)', value:k.opened + (k.sent ? ` · ${Math.round(k.opened / k.sent * 100)}%` : ''), color:'#f59e0b' }),
+            React.createElement(StatCard, { label:'Still Waiting', value:c.sendStatus === 'draft' ? c.audienceSize : k.pending, color:'#3272a8' }),
+            c.offerLabel && React.createElement(StatCard, { label:'Offer Links Used', value:c.offerRedeemed + ' / ' + c.offerLinks, color:'#10b981' }),
+          ),
+          c.sendStatus !== 'draft' && React.createElement('div', { style:{ marginBottom:14 } },
+            React.createElement('div', { style:{ display:'flex', justifyContent:'space-between', marginBottom:4 } },
+              React.createElement('span', { style:{ ...FS, fontSize:11, color:'rgba(255,255,255,0.4)' } }, (k.sent + k.skipped + k.failed) + ' of ' + c.audienceSize + ' processed'),
+              React.createElement('span', { style:{ ...FS, fontSize:12, fontWeight:800, color:c.health==='blocked'?'#ef4444':'#10b981' } }, pct + '%')
+            ),
+            React.createElement('div', { style:{ height:10, background:'rgba(255,255,255,0.08)', position:'relative', overflow:'hidden' } },
+              React.createElement('div', { style:{ height:'100%', width:pct+'%', background:c.health==='blocked'?'#ef4444':'linear-gradient(90deg,#3272a8,#10b981)', transition:'width 0.6s ease' } })
+            )
+          ),
+          React.createElement('div', { style:{ display:'flex', gap:22, flexWrap:'wrap', ...FS, fontSize:12, color:'rgba(255,255,255,0.55)' } },
+            React.createElement('span', null, 'Today: ', React.createElement('b', { style:{color:'#fff'} }, c.sentToday + ' / ' + c.dailyCap)),
+            c.sendStatus === 'running' && React.createElement('span', null, 'Next email: ', React.createElement('b', { style:{color:'#fff'} }, fmtIn(c.nextSendAt, nowMs))),
+            React.createElement('span', null, 'Last successful send: ', React.createElement('b', { style:{color:'#fff'} }, fmtAgo(c.lastSuccessAt, nowMs))),
+            React.createElement('span', null, 'Pace: 1 email every ~' + c.gapMinutes + ' min, max ' + c.dailyCap + '/day, ' + c.windowStartHour + ':00–' + c.windowEndHour + ':00 UK'),
+          ),
+          c.lastError && React.createElement('div', { style:{ ...FS, fontSize:11, color:'rgba(239,68,68,0.85)', marginTop:8, wordBreak:'break-word' } }, 'Last error (' + fmtAgo(c.lastErrorAt, nowMs) + '): ' + c.lastError)
+        );
+        const roundCampaigns = sortedCampaigns.filter(x => x.roundName === c.roundName);
+        const roundHeader = firstOfRound && React.createElement('div', { key:'rh' + c.roundName }, React.createElement(RoundProgress, {
+          round:c.roundName, campaigns:roundCampaigns, onOpenPlan:() => openPlan(c.roundName), busy:!!busy, nowMs,
+          onResume:(id) => act('resume' + id, () => window.RNTECH_API.resumeCampaign(id)),
+        }));
+        return React.createElement(React.Fragment, { key:c.id }, roundHeader, cardEl);
+      })
+    ),
+    data.campaigns.length > 0 && React.createElement('div', { style:{ ...card, marginBottom:20 } },
+      React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:6} }, 'Emails Sent Per Hour (last 24h)'),
+      React.createElement(BarChart, {
+        series:data.hourly.map(h => { const d = new Date(h.hour); const hh = String(d.getHours()).padStart(2,'0'); return { date:h.hour, label:hh, tooltipTitle:d.toLocaleString('en-GB',{weekday:'short',hour:'2-digit',minute:'2-digit'}), value:h.sent, sent:h.sent }; }),
+        color:'#10b981', valueFormatter:v=>Math.round(v), tooltipLines:d => [{ value:d.sent, label:d.sent===1?'email sent':'emails sent' }]
+      })
+    ),
+    data.events.length > 0 && React.createElement('div', { style:{ ...card, marginBottom:20, overflowX:'auto' } },
+      React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:8} }, 'Ticket Buyers By Event — Who Has Been Contacted'),
+      React.createElement('table', { style:{ width:'100%', borderCollapse:'collapse' } },
+        React.createElement('thead', null, React.createElement('tr', null, ['Event','Date','Ticket buyers','Contacted','Bounced','Not yet contacted'].map(h => React.createElement('th', { key:h, style:th }, h)))),
+        React.createElement('tbody', null, data.events.map(e => React.createElement('tr', { key:e.eventId },
+          React.createElement('td', { style:{...td,color:'#fff',fontWeight:700} }, e.title),
+          React.createElement('td', { style:td }, e.date),
+          React.createElement('td', { style:td }, e.buyers),
+          React.createElement('td', { style:td }, e.contacted),
+          React.createElement('td', { style:{...td,color:e.bounced?'#ef4444':td.color} }, e.bounced),
+          React.createElement('td', { style:td }, Math.max(e.buyers - e.contacted, 0)),
+        )))
+      )
+    ),
+    data.log.length > 0 && React.createElement('div', { style:{ ...card, overflowX:'auto' } },
+      React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:8} }, 'Live Activity (latest 30)'),
+      React.createElement('table', { style:{ width:'100%', borderCollapse:'collapse' } },
+        React.createElement('thead', null, React.createElement('tr', null, ['Time','Campaign','Recipient','Result'].map(h => React.createElement('th', { key:h, style:th }, h)))),
+        React.createElement('tbody', null, data.log.map((l, i) => React.createElement('tr', { key:i },
+          React.createElement('td', { style:{...td,whiteSpace:'nowrap'} }, fmtWhen(l.at)),
+          React.createElement('td', { style:td }, l.campaign),
+          React.createElement('td', { style:td }, l.email),
+          React.createElement('td', { style:{...td,color:l.status==='sent'?'#10b981':'#ef4444'} }, l.status + (l.opened ? ' · opened' : '') + (l.error ? ' — ' + l.error : '')),
+        )))
+      )
+    ),
+    React.createElement('div', { style:{ ...card, marginTop:20, overflowX:'auto' } },
+      React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4} }, 'Unsubscribed (' + data.unsubscribed.length + ') — never emailed'),
+      React.createElement('p', { style:{ ...FS, color:'rgba(255,255,255,0.4)', fontSize:11, margin:'0 0 8px' } }, 'People who clicked unsubscribe in an email. They\'re excluded from every campaign when it\'s queued and again at the moment each email would send.'),
+      data.unsubscribed.length === 0
+        ? React.createElement('p', { style:{ ...FS, color:'rgba(255,255,255,0.35)', fontSize:12, margin:0 } }, 'Nobody has unsubscribed.')
+        : React.createElement('table', { style:{ width:'100%', borderCollapse:'collapse' } },
+            React.createElement('thead', null, React.createElement('tr', null, ['Name','Email','Unsubscribed'].map(h => React.createElement('th', { key:h, style:th }, h)))),
+            React.createElement('tbody', null, data.unsubscribed.map((u, i) => React.createElement('tr', { key:i },
+              React.createElement('td', { style:td }, u.name), React.createElement('td', { style:td }, u.email), React.createElement('td', { style:{...td,whiteSpace:'nowrap'} }, u.unsubscribedAt ? fmtWhen(u.unsubscribedAt) : '—'))))
+          )
+    ),
+    modal && modal.kind === 'plan' && React.createElement(RoundPlanModal, { plan:modal.payload, onClose:() => setModal(null), onQueue:(startAt) => queueRound(modal.payload.round, startAt), busy:busy === 'queueround' }),
+    modal && modal.kind === 'preview' && React.createElement(Modal, { title:'Preview — ' + modal.campaign.name, onClose:() => setModal(null) },
+      React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.5)',fontSize:12,margin:'0 0 8px'} }, 'This is exactly what the email looks like (shown with the name "' + modal.payload.sampleName + '"). Every recipient gets their own first name.'),
+      React.createElement('div', { style:{...FS,color:'#fff',fontSize:14,fontWeight:700,marginBottom:10} }, 'Subject: ' + modal.payload.subject),
+      React.createElement('iframe', { title:'Email preview', srcDoc:'<body style="margin:16px;background:#fff">' + modal.payload.html + '</body>', sandbox:'', style:{ width:'100%', height:420, border:'1px solid rgba(255,255,255,0.15)', background:'#fff' } })
+    ),
+    modal && modal.kind === 'recipients' && React.createElement(Modal, { title:'Recipients — ' + modal.campaign.name + ' (' + modal.payload.recipients.length + ')', onClose:() => setModal(null) },
+      React.createElement('div', { style:{ maxHeight:420, overflow:'auto' } },
+        React.createElement('table', { style:{ width:'100%', borderCollapse:'collapse' } },
+          React.createElement('thead', null, React.createElement('tr', null, ['Name','Email','Went to','Status','Used offer','Sent'].map(h => React.createElement('th', { key:h, style:th }, h)))),
+          React.createElement('tbody', null, modal.payload.recipients.map((r, i) => React.createElement('tr', { key:i },
+            React.createElement('td', { style:td }, r.name),
+            React.createElement('td', { style:td }, r.email),
+            React.createElement('td', { style:td }, r.events),
+            React.createElement('td', { style:{...td,color:r.status==='sent'?'#10b981':(r.status==='failed'||r.status==='bounced')?'#ef4444':td.color}, title:r.error||'' }, r.status + (r.opened ? ' · opened' : '')),
+            React.createElement('td', { style:{...td,color:r.redeemed?'#10b981':td.color} }, r.redeemed ? '✓ bought' : '—'),
+            React.createElement('td', { style:{...td,whiteSpace:'nowrap'} }, fmtWhen(r.sentAt)),
+          )))
+        )
+      )
+    )
+  );
+}
+
 function TabCampaigns() {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name:'',subject:'',bodyHtml:'',delayDays:0,active:true });
+  const blankForm = () => ({ name:'',subject:'',bodyHtml:'',delayDays:0,active:true,audience:'drip',audienceEventId:'',roundName:'default',offerOn:false,offerPercent:'33.33',offerEventId:'',offerMaxTickets:4,offerExpiresAt:'',gapMinutes:20,dailyCap:30,windowStartHour:9,windowEndHour:21 });
+  const [form, setForm] = useState(blankForm);
   const [saving, setSaving] = useState(false);
-  const [blasting, setBlasting] = useState(null);
+  const [events, setEvents] = useState([]);
   const [sigHtml, setSigHtml] = useState('');
   const [notifyEmail, setNotifyEmail] = useState('');
+  const [dailyBudget, setDailyBudget] = useState('100');
   const [sigSaving, setSigSaving] = useState(false);
   const [sigSaved, setSigSaved] = useState(false);
   const [sigPreview, setSigPreview] = useState(false);
@@ -1006,37 +1908,35 @@ function TabCampaigns() {
   const load = () => window.RNTECH_API.getCampaigns().then(c=>{ setCampaigns(c); setLoading(false); }).catch(()=>setLoading(false));
   useEffect(()=>{
     load();
-    window.RNTECH_API.getSettings().then(s=>{ setSigHtml(s.email_signature||''); setNotifyEmail(s.admin_notify_email||''); }).catch(()=>{});
+    window.RNTECH_API.getEvents().then(setEvents).catch(()=>{});
+    window.RNTECH_API.getSettings().then(s=>{ setSigHtml(s.email_signature||''); setNotifyEmail(s.admin_notify_email||''); setDailyBudget(s.email_daily_budget||'100'); }).catch(()=>{});
   },[]);
 
-  const openNew = () => { setEditing(null); setForm({ name:'',subject:'',bodyHtml:'',delayDays:0,active:true }); setShowForm(true); };
-  const openEdit = (c) => { setEditing(c); setForm({ name:c.name,subject:c.subject,bodyHtml:c.bodyHtml,delayDays:c.delayDays,active:c.active }); setShowForm(true); };
+  const openNew = () => { setEditing(null); setForm(blankForm()); setShowForm(true); };
+  const openNewBroadcast = () => { setEditing(null); setForm({ ...blankForm(), audience:'event_attended', audienceEventId:(events.find(e=>e.status==='past')||events[0]||{}).id||'' }); setShowForm(true); };
+  const openEdit = (c) => { setEditing(c); setForm({ name:c.name,subject:c.subject,bodyHtml:c.bodyHtml,delayDays:c.delayDays,active:c.active,audience:c.audience||'drip',audienceEventId:c.audienceEventId||'',roundName:c.roundName||'default',offerOn:(c.offerDiscountBp||0)>0,offerPercent:c.offerDiscountBp?String(+(c.offerDiscountBp/100).toFixed(2)):'33.33',offerEventId:c.offerEventId||'',offerMaxTickets:c.offerMaxTickets||4,offerExpiresAt:c.offerExpiresAt?new Date(c.offerExpiresAt).toISOString().slice(0,16):'',gapMinutes:c.gapMinutes||20,dailyCap:c.dailyCap||30,windowStartHour:c.windowStartHour==null?9:c.windowStartHour,windowEndHour:c.windowEndHour||21 }); setShowForm(true); };
 
   const save = async (e) => {
     e.preventDefault(); setSaving(true);
     try {
-      if (editing) await window.RNTECH_API.updateCampaign(editing.id, form);
-      else await window.RNTECH_API.createCampaign(form);
+      const offerOn = form.audience !== 'drip' && form.offerOn;
+      const payload = { ...form,
+        offerDiscountBp: offerOn ? Math.round(parseFloat(form.offerPercent || 0) * 100) : 0,
+        offerEventId: offerOn ? form.offerEventId : null,
+        offerMaxTickets: parseInt(form.offerMaxTickets) || 4,
+        offerExpiresAt: offerOn && form.offerExpiresAt ? new Date(form.offerExpiresAt).toISOString() : null };
+      delete payload.offerOn; delete payload.offerPercent;
+      if (editing) await window.RNTECH_API.updateCampaign(editing.id, payload);
+      else await window.RNTECH_API.createCampaign(payload);
       setShowForm(false); load();
     } catch(err) { alert(err.message); }
     finally { setSaving(false); }
   };
 
-  const blast = async (id) => {
-    if (!confirm('Send this campaign to ALL active subscribers now?')) return;
-    setBlasting(id);
-    try {
-      const res = await window.RNTECH_API.blastCampaign(id);
-      alert('Sent to '+res.sent+' subscribers.');
-      load();
-    } catch(err) { alert(err.message); }
-    finally { setBlasting(null); }
-  };
-
   const saveSig = async () => {
     setSigSaving(true); setSigSaved(false);
     try {
-      await window.RNTECH_API.saveSettings({ email_signature: sigHtml, admin_notify_email: notifyEmail });
+      await window.RNTECH_API.saveSettings({ email_signature: sigHtml, admin_notify_email: notifyEmail, email_daily_budget: String(dailyBudget) });
       setSigSaved(true); setTimeout(()=>setSigSaved(false), 2500);
     } catch(err) { alert(err.message); }
     finally { setSigSaving(false); }
@@ -1045,37 +1945,23 @@ function TabCampaigns() {
   if (loading) return React.createElement(Spinner);
 
   return React.createElement('div', null,
-    React.createElement('div', { style:{background:'rgba(5,18,44,0.92)',border:'1px solid rgba(50,114,168,0.25)',padding:'20px 24px',marginBottom:28} },
-      React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16} },
-        React.createElement('h3', { style:{...FS,fontSize:13,fontWeight:700,color:'rgba(255,255,255,0.5)',letterSpacing:'0.12em',textTransform:'uppercase',margin:0} },'Email Settings'),
-        React.createElement('div', { style:{display:'flex',gap:8,alignItems:'center'} },
-          sigSaved&&React.createElement('span', { style:{...FS,color:'#10b981',fontSize:12} },'Saved ✓'),
-          React.createElement(GlowButton, { small:true,onClick:saveSig,disabled:sigSaving }, sigSaving?'Saving…':'Save Settings')
-        )
-      ),
-      React.createElement(AdminInput, { label:'Admin Notification Email (gets a copy of every contact form submission)',value:notifyEmail,onChange:e=>setNotifyEmail(e.target.value),placeholder:'your@email.com' }),
-      React.createElement('div', { style:{marginBottom:8} },
-        React.createElement('label', { style:labelSt },'Email Signature (HTML — appended to every outgoing email)'),
-        React.createElement('textarea', { value:sigHtml,onChange:e=>setSigHtml(e.target.value),rows:5,placeholder:'<p><strong>RNTECH Team</strong><br>rntech.live · St Albans</p>',style:{...inputSt,resize:'vertical',fontFamily:'monospace',fontSize:12} })
-      ),
-      React.createElement('div', { style:{display:'flex',gap:8,alignItems:'center',marginBottom: sigPreview?16:0} },
-        React.createElement('button', { onClick:()=>setSigPreview(v=>!v), style:{...FS,background:'transparent',border:'1px solid rgba(50,114,168,0.3)',color:'rgba(255,255,255,0.5)',cursor:'pointer',padding:'4px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} }, sigPreview?'Hide Preview':'Preview Signature')
-      ),
-      sigPreview&&sigHtml&&React.createElement('div', { style:{background:'#fff',borderRadius:4,padding:'16px 20px',border:'1px solid rgba(50,114,168,0.2)'} },
-        React.createElement('div', { dangerouslySetInnerHTML:{__html:sigHtml} })
-      )
-    ),
     React.createElement('div', { style:{background:'rgba(50,114,168,0.08)',border:'1px solid rgba(50,114,168,0.2)',padding:'16px 20px',marginBottom:24} },
       React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.6)',fontSize:13,margin:0,lineHeight:1.7} },
-        React.createElement('strong', { style:{color:'#3272a8'} },'Drip Campaigns:'),' Create email sequences sent automatically to new members based on delay days after signup. "Send Now" blasts to all existing subscribers immediately.'
+        React.createElement('strong', { style:{color:'#3272a8'} },'Broadcasts'),' go to a chosen audience (e.g. everyone who bought a ticket to an event) but are trickled out one email at a time — check the draft, then press Start Sending. ',
+        React.createElement('strong', { style:{color:'#3272a8'} },'Drip campaigns'),' send automatically to new members a set number of days after signup.'
       )
     ),
+    React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16} },
+      React.createElement('h3', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',margin:0} }, 'Broadcasts'),
+      React.createElement(GlowButton, { small:true,onClick:openNewBroadcast },'+ New Broadcast')
+    ),
+    React.createElement(EmailDashboard, { onEdit:openEdit, onChanged:load }),
     React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20} },
-      React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.5)',fontSize:14} }, campaigns.length+' campaigns'),
-      React.createElement(GlowButton, { small:true,onClick:openNew },'+ New Campaign')
+      React.createElement('h3', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',margin:0} }, 'Signup Drip Campaigns ('+campaigns.filter(c=>c.audience==='drip').length+')'),
+      React.createElement(GlowButton, { small:true,onClick:openNew },'+ New Drip Campaign')
     ),
     React.createElement('div', { style:{display:'flex',flexDirection:'column',gap:12} },
-      campaigns.map(c=>React.createElement('div', { key:c.id, style:{background:'rgba(5,18,44,0.92)',border:'1px solid rgba(50,114,168,0.2)',padding:'18px 20px'} },
+      campaigns.filter(c=>c.audience==='drip').map(c=>React.createElement('div', { key:c.id, style:{background:'rgba(5,18,44,0.92)',border:'1px solid rgba(50,114,168,0.2)',padding:'18px 20px'} },
         React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12} },
           React.createElement('div', null,
             React.createElement('h3', { style:{...FS,fontWeight:800,fontSize:15,color:'#fff',margin:'0 0 4px'} }, c.name),
@@ -1088,26 +1974,72 @@ function TabCampaigns() {
             )
           ),
           React.createElement('div', { style:{display:'flex',gap:8,flexWrap:'wrap'} },
-            React.createElement(GlowButton, { small:true,variant:'pink',onClick:()=>blast(c.id),disabled:blasting===c.id }, blasting===c.id?'Sending…':'Send Now'),
             React.createElement(GlowButton, { small:true,variant:'ghost',onClick:()=>openEdit(c) },'Edit'),
             React.createElement(GlowButton, { small:true,variant:'danger',onClick:()=>window.RNTECH_API.deleteCampaign(c.id).then(load) },'Delete')
           )
         )
       ))
     ),
+    React.createElement('div', { style:{ marginTop:40, paddingTop:24, borderTop:'1px solid rgba(255,255,255,0.08)' } },
+    React.createElement('div', { style:{background:'rgba(5,18,44,0.92)',border:'1px solid rgba(50,114,168,0.25)',padding:'20px 24px',marginBottom:28} },
+      React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16} },
+        React.createElement('h3', { style:{...FS,fontSize:13,fontWeight:700,color:'rgba(255,255,255,0.5)',letterSpacing:'0.12em',textTransform:'uppercase',margin:0} },'Email Settings'),
+        React.createElement('div', { style:{display:'flex',gap:8,alignItems:'center'} },
+          sigSaved&&React.createElement('span', { style:{...FS,color:'#10b981',fontSize:12} },'Saved ✓'),
+          React.createElement(GlowButton, { small:true,onClick:saveSig,disabled:sigSaving }, sigSaving?'Saving…':'Save Settings')
+        )
+      ),
+      React.createElement(AdminInput, { label:'Admin Notification Email (gets a copy of every contact form submission)',value:notifyEmail,onChange:e=>setNotifyEmail(e.target.value),placeholder:'your@email.com' }),
+      React.createElement(AdminInput, { label:'Daily email limit (whole mailbox — tests, ticket emails and contact replies all count towards this, not just campaigns)',type:'number',min:1,value:dailyBudget,onChange:e=>setDailyBudget(e.target.value) }),
+      React.createElement('div', { style:{marginBottom:8} },
+        React.createElement('label', { style:labelSt },'Email Signature (HTML — added to emails you send from the Inbox tab; not used on campaigns)'),
+        React.createElement('textarea', { value:sigHtml,onChange:e=>setSigHtml(e.target.value),rows:5,placeholder:'<p><strong>RNTECH Team</strong><br>rntech.live · St Albans</p>',style:{...inputSt,resize:'vertical',fontFamily:'monospace',fontSize:12} })
+      ),
+      React.createElement('div', { style:{display:'flex',gap:8,alignItems:'center',marginBottom: sigPreview?16:0} },
+        React.createElement('button', { onClick:()=>setSigPreview(v=>!v), style:{...FS,background:'transparent',border:'1px solid rgba(50,114,168,0.3)',color:'rgba(255,255,255,0.5)',cursor:'pointer',padding:'4px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} }, sigPreview?'Hide Preview':'Preview Signature')
+      ),
+      sigPreview&&sigHtml&&React.createElement('div', { style:{background:'#fff',borderRadius:4,padding:'16px 20px',border:'1px solid rgba(50,114,168,0.2)'} },
+        React.createElement('div', { dangerouslySetInnerHTML:{__html:sigHtml} })
+      )
+    ),
+    ),
     showForm&&React.createElement(Modal, { title:editing?'Edit Campaign':'New Campaign', onClose:()=>setShowForm(false) },
       React.createElement('form', { onSubmit:save },
         React.createElement(AdminInput, { label:'Campaign Name (internal)',value:form.name,onChange:e=>setForm(f=>({...f,name:e.target.value})),required:true }),
         React.createElement(AdminInput, { label:'Email Subject',value:form.subject,onChange:e=>setForm(f=>({...f,subject:e.target.value})),required:true }),
-        React.createElement(AdminInput, { label:'Send After N Days (0 = immediately on signup)',type:'number',min:0,value:form.delayDays,onChange:e=>setForm(f=>({...f,delayDays:parseInt(e.target.value)||0})) }),
-        React.createElement(AdminTextarea, { label:'Email Body (HTML or plain text)',value:form.bodyHtml,onChange:e=>setForm(f=>({...f,bodyHtml:e.target.value})),rows:10,placeholder:'<h1>Welcome to RNTECH</h1>\n<p>Thanks for joining...</p>' }),
-        React.createElement('div', { style:{display:'flex',gap:12,alignItems:'center',marginBottom:20} },
+        !editing && React.createElement(AdminSelect, { label:'Who gets this',value:form.audience,onChange:e=>setForm(f=>({...f,audience:e.target.value})),options:[{value:'drip',label:'New signups (automatic drip)'},{value:'event_attended',label:'Scanned in at an event (paced broadcast)'},{value:'event_no_show',label:'Bought a ticket but never scanned in (paced broadcast)'},{value:'event_buyers',label:'Anyone who bought a ticket to an event (paced broadcast)'},{value:'everyone_else',label:'Everyone else not covered by another campaign in the round (paced broadcast)'},{value:'all_subscribers',label:'All subscribers (paced broadcast)'}] }),
+        form.audience==='drip' && React.createElement(AdminInput, { label:'Send After N Days (0 = immediately on signup)',type:'number',min:0,value:form.delayDays,onChange:e=>setForm(f=>({...f,delayDays:parseInt(e.target.value)||0})) }),
+        ['event_attended','event_no_show','event_buyers'].includes(form.audience) && React.createElement(AdminSelect, { label:'Based on this event',value:form.audienceEventId,disabled:!!editing&&editing.sendStatus!=='draft',onChange:e=>setForm(f=>({...f,audienceEventId:e.target.value})),options:events.map(ev=>({value:ev.id,label:ev.title+' — '+(ev.displayDate||ev.date)})) }),
+        form.audience!=='drip' && React.createElement(AdminInput, { label:'Round (campaigns in one round never email the same person and send one after another)',value:form.roundName,disabled:!!editing&&editing.sendStatus!=='draft',onChange:e=>setForm(f=>({...f,roundName:e.target.value})),placeholder:'Halloween 2026' }),
+        form.audience!=='drip' && React.createElement('div', { style:{ border:'1px solid rgba(50,114,168,0.25)',padding:'12px 14px',marginBottom:14 } },
+          React.createElement('label', { style:{...FS,color:'rgba(255,255,255,0.8)',fontSize:14,cursor:'pointer',display:'flex',alignItems:'center',gap:8} },
+            React.createElement('input', { type:'checkbox',checked:form.offerOn,onChange:e=>setForm(f=>({...f,offerOn:e.target.checked,offerEventId:f.offerEventId||(events.find(ev=>ev.status==='upcoming')||events[0]||{}).id||''})),style:{accentColor:'#3272a8',width:16,height:16} }),
+            'Give every recipient a personal discount link'
+          ),
+          form.offerOn && React.createElement('div', { style:{ marginTop:12 } },
+            React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.45)',fontSize:11,lineHeight:1.6,margin:'0 0 10px'} }, 'Each person gets their own unguessable link. It only works for their account (tickets always go to them, name/email can\'t be changed), can be used once, and dies when the event starts. Put {{offer_link}} where the button link goes, and {{ticket_prices}} for the was/now price list.'),
+            React.createElement(AdminSelect, { label:'Discount applies to tickets for',value:form.offerEventId,onChange:e=>setForm(f=>({...f,offerEventId:e.target.value})),options:events.map(ev=>({value:ev.id,label:ev.title+' — '+(ev.displayDate||ev.date)})) }),
+            React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12} },
+              React.createElement(AdminInput, { label:'Discount % (33.33 = 1/3 off)',type:'number',step:'0.01',min:'1',max:'95',value:form.offerPercent,onChange:e=>setForm(f=>({...f,offerPercent:e.target.value})) }),
+              React.createElement(AdminInput, { label:'Max tickets per link',type:'number',min:1,max:10,value:form.offerMaxTickets,onChange:e=>setForm(f=>({...f,offerMaxTickets:e.target.value})) }),
+              React.createElement(AdminInput, { label:'Expires (optional)',type:'datetime-local',value:form.offerExpiresAt,onChange:e=>setForm(f=>({...f,offerExpiresAt:e.target.value})) })
+            )
+          )
+        ),
+        form.audience!=='drip' && React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:12} },
+          React.createElement(AdminInput, { label:'Minutes between emails',type:'number',min:1,value:form.gapMinutes,onChange:e=>setForm(f=>({...f,gapMinutes:parseInt(e.target.value)||1})) }),
+          React.createElement(AdminInput, { label:'Max emails per day',type:'number',min:1,value:form.dailyCap,onChange:e=>setForm(f=>({...f,dailyCap:parseInt(e.target.value)||1})) }),
+          React.createElement(AdminInput, { label:'Send from (UK hour)',type:'number',min:0,max:23,value:form.windowStartHour,onChange:e=>setForm(f=>({...f,windowStartHour:parseInt(e.target.value)||0})) }),
+          React.createElement(AdminInput, { label:'Send until (UK hour)',type:'number',min:1,max:24,value:form.windowEndHour,onChange:e=>setForm(f=>({...f,windowEndHour:parseInt(e.target.value)||24})) })
+        ),
+        React.createElement(AdminTextarea, { label:'Email Body (HTML or plain text — {{first_name}} and {{event}} are filled in per person)',value:form.bodyHtml,onChange:e=>setForm(f=>({...f,bodyHtml:e.target.value})),rows:10,placeholder:'<h1>Welcome to RNTECH</h1>\n<p>Hi {{first_name}}, thanks for joining...</p>' }),
+        form.audience==='drip' && React.createElement('div', { style:{display:'flex',gap:12,alignItems:'center',marginBottom:20} },
           React.createElement('label', { style:{...FS,color:'rgba(255,255,255,0.7)',fontSize:14,cursor:'pointer',display:'flex',alignItems:'center',gap:8} },
             React.createElement('input', { type:'checkbox',checked:form.active,onChange:e=>setForm(f=>({...f,active:e.target.checked})),style:{accentColor:'#3272a8',width:16,height:16} }),
             'Active (send to new signups)'
           )
         ),
-        React.createElement(GlowButton, { type:'submit',style:{width:'100%'},disabled:saving }, saving?'Saving…':editing?'Update Campaign':'Create Campaign')
+        React.createElement(GlowButton, { type:'submit',style:{width:'100%'},disabled:saving }, saving?'Saving…':editing?'Update Campaign':(form.audience==='drip'?'Create Campaign':'Save As Draft'))
       )
     )
   );
@@ -1182,6 +2114,8 @@ function InviteToBuyModal({ interest, interestIds, allAttendeesEventId, eventId,
   const allAttendees = !!allAttendeesEventId;
   const paidTypes = (ticketTypes||[]).filter(t=>t.active && t.price>0);
   const [discountPercent, setDiscountPercent] = useState(0);
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -1190,10 +2124,10 @@ function InviteToBuyModal({ interest, interestIds, allAttendeesEventId, eventId,
     const pct = Math.max(0, Math.min(100, Math.round(Number(discountPercent)||0)));
     try {
       const res = allAttendees
-        ? await window.RNTECH_API.inviteAllAttendees(allAttendeesEventId, pct)
+        ? await window.RNTECH_API.inviteAllAttendees(allAttendeesEventId, pct, subject, message)
         : bulk
-        ? await window.RNTECH_API.bulkInviteInterest(interestIds, eventId, pct)
-        : await window.RNTECH_API.inviteInterest(interest.id, pct);
+        ? await window.RNTECH_API.bulkInviteInterest(interestIds, eventId, pct, subject, message)
+        : await window.RNTECH_API.inviteInterest(interest.id, pct, subject, message);
       onSent(res);
     } catch(err) { setError(err.message||'Failed to send invite'); }
     finally { setBusy(false); }
@@ -1216,7 +2150,11 @@ function InviteToBuyModal({ interest, interestIds, allAttendeesEventId, eventId,
             React.createElement('label', { style:{...FS,display:'block',fontSize:11,letterSpacing:'0.08em',textTransform:'uppercase',color:'rgba(255,255,255,0.4)',marginBottom:6} }, 'Discount % (local customer)'),
             React.createElement('input', { type:'number', min:0, max:100, step:1, value:discountPercent, onChange:e=>setDiscountPercent(e.target.value), style:inputSt }),
             React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.6)',fontSize:13,marginBottom:16} },
-              discountPercent>0 ? `${discountPercent}% off any ticket type they choose` : 'Full price — no discount')
+              discountPercent>0 ? `${discountPercent}% off any ticket type they choose` : 'Full price — no discount'),
+            React.createElement('label', { style:{...FS,display:'block',fontSize:11,letterSpacing:'0.08em',textTransform:'uppercase',color:'rgba(255,255,255,0.4)',marginBottom:6} }, 'Custom Subject (optional)'),
+            React.createElement('input', { value:subject, onChange:e=>setSubject(e.target.value), placeholder:"You're invited — grab your ticket to "+"…", style:{...inputSt, marginBottom:14} }),
+            React.createElement('label', { style:{...FS,display:'block',fontSize:11,letterSpacing:'0.08em',textTransform:'uppercase',color:'rgba(255,255,255,0.4)',marginBottom:6} }, 'Custom Message (optional — replaces the default intro; leave blank lines between paragraphs)'),
+            React.createElement('textarea', { value:message, onChange:e=>setMessage(e.target.value), rows:5, style:{...inputSt, marginBottom:16, resize:'vertical', fontFamily:"'Space Grotesk',sans-serif"} })
           ),
       error && React.createElement('div', { style:{ color:'#ef4444',fontSize:13,marginBottom:12,...FS } }, error),
       React.createElement('div', { style:{display:'flex',gap:10,justifyContent:'flex-end'} },

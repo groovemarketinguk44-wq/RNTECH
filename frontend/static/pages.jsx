@@ -16,6 +16,33 @@ function renderBio(text) {
   );
 }
 
+// Small Instagram pill shown under a DJ's name when they have a handle on file — styled
+// like the site's primary CTA buttons (same gradient + glow) rather than a plain icon link.
+function InstagramLink({ handle }) {
+  if (!handle) return null;
+  return React.createElement('a', {
+    href:`https://instagram.com/${handle}`, target:'_blank', rel:'noopener noreferrer',
+    onClick:e=>e.stopPropagation(),
+    title:'@'+handle,
+    style:{
+      position:'absolute', top:-10, right:-10, zIndex:2,
+      display:'flex', alignItems:'center', justifyContent:'center',
+      width:26, height:26, borderRadius:'50%',
+      border:'2px solid #050c17',
+      background:'linear-gradient(135deg,#3272a8,#9f84b2,#3272a8)', backgroundSize:'200% 200%',
+      animation:'btnGlow 3s ease infinite',
+      color:'#fff', textDecoration:'none',
+      boxShadow:'0 0 14px rgba(50,114,168,0.5), 0 0 28px rgba(159,132,178,0.25)',
+    }
+  },
+    React.createElement('svg', { width:14, height:14, viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', strokeWidth:2.2 },
+      React.createElement('rect', { x:2, y:2, width:20, height:20, rx:5 }),
+      React.createElement('circle', { cx:12, cy:12, r:4.2 }),
+      React.createElement('circle', { cx:17.3, cy:6.7, r:0.9, fill:'currentColor', stroke:'none' })
+    )
+  );
+}
+
 /* ─── HOME ─────────────────────────────────────────────────────────── */
 function PageHome({ user, onAuth, onNavigate, onPlayMix, currentMix }) {
   const [events, setEvents] = useState([]);
@@ -65,12 +92,13 @@ function PageHome({ user, onAuth, onNavigate, onPlayMix, currentMix }) {
     ),
 
     // Lineup
-    featured&&React.createElement('section', { style:{ padding:'60px 24px',maxWidth:900,margin:'0 auto' } },
+    featured&&featured.lineup.length>0&&React.createElement('section', { style:{ padding:'60px 24px',maxWidth:900,margin:'0 auto' } },
       React.createElement(SectionHeader, { title:'Lineup', subtitle:featured.title+' · '+featured.displayDate }),
       React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16 } },
         featured.lineup.map(dj=>React.createElement(FuturisticCard, { key:dj.name,active:dj.role==='Headliner',style:{ textAlign:'center' } },
           React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:'#fff',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:dj.role==='Headliner'?8:0 } }, dj.name),
-          dj.role==='Headliner'&&React.createElement(Chip, { label:'Headliner', color:'#3272a8' })
+          dj.role==='Headliner'&&React.createElement(Chip, { label:'Headliner', color:'#3272a8' }),
+          React.createElement(InstagramLink, { handle:dj.instagram })
         ))
       )
     ),
@@ -128,9 +156,11 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
   };
 
   const handleRegister = (event) => {
-    window.scrollTo(0, 0);
     if (event.registrationMode === 'closed') { alert('Registration for this event is now closed.'); return; }
     if (event.registrationMode === 'interest') {
+      // Interest registration swaps in a full page (not an overlay), so jump to its top.
+      // The ticket modal below is a fixed overlay instead, so it doesn't need this.
+      window.scrollTo(0, 0);
       setInterestEvent(event);
       setInterestFirst(user ? (user.firstName || '') : '');
       setInterestLast(user ? (user.lastName || '') : '');
@@ -226,93 +256,114 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
   if (loading) return React.createElement('div',{style:{padding:'120px 24px'}},React.createElement(Spinner));
   const upcoming = events.filter(e=>e.status==='upcoming');
   const past = events.filter(e=>e.status==='past');
+  const inputStyle = { width:'100%',padding:'9px 14px',marginBottom:8,background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'#fff',fontSize:14,fontFamily:"'Space Grotesk',sans-serif",outline:'none',boxSizing:'border-box' };
 
-  if (selected) return React.createElement(EventDetail, { event:selected,user,onBack:()=>setSelected(null),onRegister:handleRegister });
+  // A fixed-overlay modal, so it needs to render on top of whichever sub-view (list / event
+  // detail / interest form) is active below — it used to live only inside the default list
+  // branch, so buying a ticket from the event-detail page silently set ticketEvent but the
+  // modal never rendered (that branch returned before ever reaching this code).
+  const ticketModal = ticketEvent&&React.createElement('div', { className:'modal-overlay', style:{ position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20 }, onClick:()=>setTicketEvent(null) },
+    React.createElement('div', { className:'modal-sheet', onClick:e=>e.stopPropagation(), style:{ background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:16,width:'100%',maxWidth:440,maxHeight:'94vh',overflowY:'auto',boxShadow:'0 0 60px rgba(50,114,168,0.2)' } },
+      React.createElement('div',{className:'modal-handle'}),
+      React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:16,color:'#fff',margin:'0 0 3px',textTransform:'uppercase' } },'Get Tickets'),
+      React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:10,marginBottom:8 } }, ticketEvent.title+' · '+ticketEvent.displayDate),
+      ticketEvent.ticketBannerImage&&React.createElement('img', { src:ticketEvent.ticketBannerImage, alt:ticketEvent.title, style:{ width:'100%',height:85,objectFit:'cover',objectPosition:'center 75%',display:'block',marginBottom:8 } }),
+      ticketEvent.ticketBio&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.6)',fontSize:10.5,lineHeight:1.4,marginBottom:10 } }, renderBio(ticketEvent.ticketBio)),
+      React.createElement('div', { style:{ display:'flex',flexDirection:'column',gap:5,marginBottom:10 } },
+        (ticketEvent.ticketTypes||[]).filter(t=>t.active).map(t=>{
+          const isSel = selectedType&&selectedType.id===t.id;
+          const remaining = Math.max((t.capacity||0)-(t.soldCount||0), 0);
+          const soldOut = t.soldOut||remaining<=0;
+          const maxQty = Math.max(Math.min(10, remaining), soldOut?0:1);
+          return React.createElement('div', { key:t.id, onClick:soldOut?undefined:()=>{ if(isSel){ setSelectedType(null); } else { setSelectedType(t); setQuantity(1); } }, style:{ position:'relative',overflow:'visible',background:isSel?'rgba(50,114,168,0.15)':'rgba(255,255,255,0.03)',border:`1px solid ${isSel?'rgba(50,114,168,0.5)':'rgba(255,255,255,0.1)'}`,borderRadius:0,padding:'8px 10px',cursor:soldOut?'default':'pointer',display:'flex',justifyContent:'space-between',alignItems:'center' } },
+            React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,color:soldOut?'rgba(255,255,255,0.35)':'#fff',textDecoration:soldOut?'line-through':'none' } }, t.name),
+            soldOut
+              ? React.createElement('div', { style:{ display:'flex',alignItems:'center',gap:8 } },
+                  t.price>0&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,color:'rgba(255,255,255,0.35)',textDecoration:'line-through' } }, '£'+(t.price/100).toFixed(2)),
+                  React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:13,letterSpacing:'0.06em',color:'#e5484d',textTransform:'uppercase' } }, 'Sold Out')
+                )
+              : isSel
+              ? React.createElement('div', { onClick:e=>e.stopPropagation(), style:{ display:'flex',alignItems:'center',gap:8,border:'1px solid rgba(255,255,255,0.2)',padding:'2px 8px' } },
+                  React.createElement('button', { onClick:()=>setQuantity(q=>Math.max(1,q-1)), disabled:quantity<=1, style:{ background:'none',border:'none',color:quantity<=1?'rgba(255,255,255,0.2)':'#fff',fontSize:15,cursor:quantity<=1?'default':'pointer',fontFamily:"'Space Grotesk',sans-serif",padding:'0 3px' } }, '−'),
+                  React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'#fff',fontSize:13,fontWeight:700,minWidth:14,textAlign:'center' } }, quantity),
+                  React.createElement('button', { onClick:()=>setQuantity(q=>Math.min(maxQty,q+1)), disabled:quantity>=maxQty, style:{ background:'none',border:'none',color:quantity>=maxQty?'rgba(255,255,255,0.2)':'#fff',fontSize:15,cursor:quantity>=maxQty?'default':'pointer',fontFamily:"'Space Grotesk',sans-serif",padding:'0 3px' } }, '+')
+                )
+              : React.createElement('div', { style:{ display:'flex',alignItems:'center',gap:8 } },
+                  t.nearlyGone&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:9.5,letterSpacing:'0.05em',textTransform:'uppercase',color:'#f59e0b' } }, 'Nearly Gone'),
+                  React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:t.price===0?'#10b981':'#fff' } }, t.price===0?'FREE':'£'+(t.price/100).toFixed(2))
+                )
+          );
+        })
+      ),
+      React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8 } },
+        React.createElement('input', { placeholder:'Your Name',value:holderName,onChange:e=>setHolderName(e.target.value),style:{...inputStyle,marginBottom:0} }),
+        React.createElement('input', { type:'email',placeholder:'Your Email',value:holderEmail,onChange:e=>setHolderEmail(e.target.value),style:{...inputStyle,marginBottom:0} })
+      ),
+      !user&&React.createElement('p', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.3)',fontSize:9.5,margin:'0 0 6px',lineHeight:1.35} },"We'll set up a free RNTECH account with these details so your ticket is always there under My Tickets."),
+      buyError&&React.createElement('div', { style:{ color:'#ef4444',fontSize:11,marginBottom:6,fontFamily:"'Space Grotesk',sans-serif" } }, buyError),
+      React.createElement(GlowButton, { onClick:doTicket,style:{ width:'100%',marginTop:0,padding:'10px 18px'},disabled:buying },
+        buying?'Processing…':selectedType&&selectedType.price===0
+          ?(quantity>1?`Confirm ${quantity} Free Tickets`:'Confirm Free Ticket')
+          :(quantity>1&&selectedType?`Pay £${(selectedType.price*quantity/100).toFixed(2)} — ${quantity} Tickets`:'Confirm Purchase'))
+    )
+  );
 
   if (interestEvent) {
     const iSt = { width:'100%',padding:'12px 16px',marginBottom:12,background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'#fff',fontSize:14,fontFamily:"'Space Grotesk',sans-serif",outline:'none',boxSizing:'border-box' };
-    return React.createElement('div', { style:{ padding:'100px 24px 80px',maxWidth:500,margin:'0 auto' } },
-      React.createElement('button', { onClick:()=>{ setInterestEvent(null); setInterestDone(false); }, style:{ background:'none',border:'none',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:14,marginBottom:32,display:'flex',alignItems:'center',gap:8,padding:0 } },'← Back to Events'),
-      interestDone
-        ? React.createElement('div', { style:{ textAlign:'center' } },
-            React.createElement('div', { style:{ fontSize:48,marginBottom:16 } },'✓'),
-            React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:22,color:'#10b981',margin:'0 0 12px',textTransform:'uppercase' } },"You're on the list!"),
-            React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:14,marginBottom:24 } },"We'll be in touch when spots open up. You're now signed in to your RNTECH account."),
-            React.createElement(GlowButton, { onClick:()=>{ setInterestEvent(null); setInterestDone(false); }, style:{ width:'100%' } },'Back to Events')
-          )
-        : React.createElement('div', null,
-            React.createElement(SectionHeader, { title:'Register Interest', subtitle:interestEvent.title+' · '+interestEvent.displayDate }),
-            React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:0 } },
-              React.createElement('input', { placeholder:'First Name',value:interestFirst,onChange:e=>setInterestFirst(e.target.value),style:iSt }),
-              React.createElement('input', { placeholder:'Last Name',value:interestLast,onChange:e=>setInterestLast(e.target.value),style:iSt })
-            ),
-            React.createElement('input', { type:'email',placeholder:'Email Address',value:interestEmail,onChange:e=>setInterestEmail(e.target.value),style:iSt }),
-            React.createElement('input', { placeholder:'Instagram handle (optional)',value:interestInstagram,onChange:e=>setInterestInstagram(e.target.value),style:{...iSt,opacity:0.75} }),
-            !user&&React.createElement('input', { type:'password',placeholder:'Set a password for your RNTECH account',value:interestPassword,onChange:e=>setInterestPassword(e.target.value),minLength:6,style:iSt }),
-            !user&&React.createElement('p', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.3)',fontSize:11,marginBottom:12,lineHeight:1.5} },'Registering creates your RNTECH account. Already have one? Enter your password above.'),
-            interestError&&React.createElement('div', { style:{ color:'#ef4444',fontSize:13,marginBottom:12,fontFamily:"'Space Grotesk',sans-serif" } }, interestError),
-            React.createElement(GlowButton, { onClick:doInterest,style:{ width:'100%' },disabled:interestBusy }, interestBusy?'Sending…':'Register Interest')
-          )
+    return React.createElement(React.Fragment, null,
+      React.createElement('div', { style:{ padding:'100px 24px 80px',maxWidth:500,margin:'0 auto' } },
+        React.createElement('button', { onClick:()=>{ setInterestEvent(null); setInterestDone(false); }, style:{ background:'none',border:'none',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:14,marginBottom:32,display:'flex',alignItems:'center',gap:8,padding:0 } },'← Back to Events'),
+        interestDone
+          ? React.createElement('div', { style:{ textAlign:'center' } },
+              React.createElement('div', { style:{ fontSize:48,marginBottom:16 } },'✓'),
+              React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:22,color:'#10b981',margin:'0 0 12px',textTransform:'uppercase' } },"You're on the list!"),
+              React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:14,marginBottom:24 } },"We'll be in touch when spots open up. You're now signed in to your RNTECH account."),
+              React.createElement(GlowButton, { onClick:()=>{ setInterestEvent(null); setInterestDone(false); }, style:{ width:'100%' } },'Back to Events')
+            )
+          : React.createElement('div', null,
+              React.createElement(SectionHeader, { title:'Register Interest', subtitle:interestEvent.title+' · '+interestEvent.displayDate }),
+              React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:0 } },
+                React.createElement('input', { placeholder:'First Name',value:interestFirst,onChange:e=>setInterestFirst(e.target.value),style:iSt }),
+                React.createElement('input', { placeholder:'Last Name',value:interestLast,onChange:e=>setInterestLast(e.target.value),style:iSt })
+              ),
+              React.createElement('input', { type:'email',placeholder:'Email Address',value:interestEmail,onChange:e=>setInterestEmail(e.target.value),style:iSt }),
+              React.createElement('input', { placeholder:'Instagram handle (optional)',value:interestInstagram,onChange:e=>setInterestInstagram(e.target.value),style:{...iSt,opacity:0.75} }),
+              !user&&React.createElement('input', { type:'password',placeholder:'Set a password for your RNTECH account',value:interestPassword,onChange:e=>setInterestPassword(e.target.value),minLength:6,style:iSt }),
+              !user&&React.createElement('p', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.3)',fontSize:11,marginBottom:12,lineHeight:1.5} },'Registering creates your RNTECH account. Already have one? Enter your password above.'),
+              interestError&&React.createElement('div', { style:{ color:'#ef4444',fontSize:13,marginBottom:12,fontFamily:"'Space Grotesk',sans-serif" } }, interestError),
+              React.createElement(GlowButton, { onClick:doInterest,style:{ width:'100%' },disabled:interestBusy }, interestBusy?'Sending…':'Register Interest')
+            )
+      ),
+      ticketModal
     );
   }
 
-  const inputStyle = { width:'100%',padding:'9px 14px',marginBottom:8,background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'#fff',fontSize:14,fontFamily:"'Space Grotesk',sans-serif",outline:'none',boxSizing:'border-box' };
+  if (selected) return React.createElement(React.Fragment, null,
+    React.createElement(EventDetail, { event:selected,user,onBack:()=>setSelected(null),onRegister:handleRegister }),
+    ticketModal
+  );
 
-  return React.createElement('div', { style:{ padding:'100px 24px 100px',maxWidth:900,margin:'0 auto' } },
-    React.createElement(SectionHeader, { title:'Events', subtitle:'All RNTECH events — past and upcoming.' }),
-    ticketSuccess&&React.createElement('div', { style:{ background:'rgba(16,185,129,0.1)',border:'1px solid rgba(16,185,129,0.3)',borderRadius:0,padding:20,marginBottom:32,fontFamily:"'Space Grotesk',sans-serif",color:'#10b981' } },
-      '✓ Ticket confirmed! Ref: '+ticketSuccess.id,
-      React.createElement('button', { onClick:()=>setTicketSuccess(null), style:{ background:'none',border:'none',color:'#10b981',cursor:'pointer',marginLeft:12 } },'×')
-    ),
-    upcoming.length>0&&React.createElement('div', { style:{ marginBottom:48 } },
-      React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:20 } },'Upcoming'),
-      React.createElement('div', { style:{ display:'grid',gap:20,gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))' } },
-        upcoming.map(e=>React.createElement(EventCard, { key:e.id,event:e,onSelect:setSelected,onRegister:handleRegister }))
+  return React.createElement(React.Fragment, null,
+    React.createElement('div', { style:{ padding:'100px 24px 100px',maxWidth:900,margin:'0 auto' } },
+      React.createElement(SectionHeader, { title:'Events', subtitle:'All RNTECH events — past and upcoming.' }),
+      ticketSuccess&&React.createElement('div', { style:{ background:'rgba(16,185,129,0.1)',border:'1px solid rgba(16,185,129,0.3)',borderRadius:0,padding:20,marginBottom:32,fontFamily:"'Space Grotesk',sans-serif",color:'#10b981' } },
+        '✓ Ticket confirmed! Ref: '+ticketSuccess.id,
+        React.createElement('button', { onClick:()=>setTicketSuccess(null), style:{ background:'none',border:'none',color:'#10b981',cursor:'pointer',marginLeft:12 } },'×')
+      ),
+      upcoming.length>0&&React.createElement('div', { style:{ marginBottom:48 } },
+        React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:20 } },'Upcoming'),
+        React.createElement('div', { style:{ display:'grid',gap:20,gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))' } },
+          upcoming.map(e=>React.createElement(EventCard, { key:e.id,event:e,onSelect:setSelected,onRegister:handleRegister }))
+        )
+      ),
+      past.length>0&&React.createElement('div', null,
+        React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:20 } },'Past Events'),
+        React.createElement('div', { style:{ display:'grid',gap:20,gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))' } },
+          past.map(e=>React.createElement(EventCard, { key:e.id,event:e,onSelect:setSelected,onRegister:handleRegister }))
+        )
       )
     ),
-    past.length>0&&React.createElement('div', null,
-      React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:20 } },'Past Events'),
-      React.createElement('div', { style:{ display:'grid',gap:20,gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))' } },
-        past.map(e=>React.createElement(EventCard, { key:e.id,event:e,onSelect:setSelected,onRegister:handleRegister }))
-      )
-    ),
-    // Ticket modal
-    ticketEvent&&React.createElement('div', { className:'modal-overlay', style:{ position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20 }, onClick:()=>setTicketEvent(null) },
-      React.createElement('div', { className:'modal-sheet', onClick:e=>e.stopPropagation(), style:{ background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:16,width:'100%',maxWidth:440,maxHeight:'94vh',overflowY:'auto',boxShadow:'0 0 60px rgba(50,114,168,0.2)' } },
-        React.createElement('div',{className:'modal-handle'}),
-        React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:16,color:'#fff',margin:'0 0 3px',textTransform:'uppercase' } },'Get Tickets'),
-        React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:10,marginBottom:8 } }, ticketEvent.title+' · '+ticketEvent.displayDate),
-        ticketEvent.ticketBannerImage&&React.createElement('img', { src:ticketEvent.ticketBannerImage, alt:ticketEvent.title, style:{ width:'100%',height:85,objectFit:'cover',objectPosition:'center 25%',display:'block',marginBottom:8 } }),
-        ticketEvent.ticketBio&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.6)',fontSize:10.5,lineHeight:1.4,marginBottom:10 } }, renderBio(ticketEvent.ticketBio)),
-        React.createElement('div', { style:{ display:'flex',flexDirection:'column',gap:5,marginBottom:10 } },
-          (ticketEvent.ticketTypes||[]).filter(t=>t.active).map(t=>{
-            const isSel = selectedType&&selectedType.id===t.id;
-            const remaining = Math.max((t.capacity||0)-(t.soldCount||0), 0);
-            const maxQty = Math.max(Math.min(10, remaining), 1);
-            return React.createElement('div', { key:t.id, onClick:()=>{ if(isSel){ setSelectedType(null); } else { setSelectedType(t); setQuantity(1); } }, style:{ background:isSel?'rgba(50,114,168,0.15)':'rgba(255,255,255,0.03)',border:`1px solid ${isSel?'rgba(50,114,168,0.5)':'rgba(255,255,255,0.1)'}`,borderRadius:0,padding:'8px 10px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center' } },
-              React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,color:'#fff' } }, t.name),
-              isSel
-                ? React.createElement('div', { onClick:e=>e.stopPropagation(), style:{ display:'flex',alignItems:'center',gap:8,border:'1px solid rgba(255,255,255,0.2)',padding:'2px 8px' } },
-                    React.createElement('button', { onClick:()=>setQuantity(q=>Math.max(1,q-1)), disabled:quantity<=1, style:{ background:'none',border:'none',color:quantity<=1?'rgba(255,255,255,0.2)':'#fff',fontSize:15,cursor:quantity<=1?'default':'pointer',fontFamily:"'Space Grotesk',sans-serif",padding:'0 3px' } }, '−'),
-                    React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'#fff',fontSize:13,fontWeight:700,minWidth:14,textAlign:'center' } }, quantity),
-                    React.createElement('button', { onClick:()=>setQuantity(q=>Math.min(maxQty,q+1)), disabled:quantity>=maxQty, style:{ background:'none',border:'none',color:quantity>=maxQty?'rgba(255,255,255,0.2)':'#fff',fontSize:15,cursor:quantity>=maxQty?'default':'pointer',fontFamily:"'Space Grotesk',sans-serif",padding:'0 3px' } }, '+')
-                  )
-                : React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:t.price===0?'#10b981':'#fff' } }, t.price===0?'FREE':'£'+(t.price/100).toFixed(2))
-            );
-          })
-        ),
-        React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8 } },
-          React.createElement('input', { placeholder:'Your Name',value:holderName,onChange:e=>setHolderName(e.target.value),style:{...inputStyle,marginBottom:0} }),
-          React.createElement('input', { type:'email',placeholder:'Your Email',value:holderEmail,onChange:e=>setHolderEmail(e.target.value),style:{...inputStyle,marginBottom:0} })
-        ),
-        !user&&React.createElement('p', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.3)',fontSize:9.5,margin:'0 0 6px',lineHeight:1.35} },"We'll set up a free RNTECH account with these details so your ticket is always there under My Tickets."),
-        buyError&&React.createElement('div', { style:{ color:'#ef4444',fontSize:11,marginBottom:6,fontFamily:"'Space Grotesk',sans-serif" } }, buyError),
-        React.createElement(GlowButton, { onClick:doTicket,style:{ width:'100%',marginTop:0,padding:'10px 18px'},disabled:buying },
-          buying?'Processing…':selectedType&&selectedType.price===0
-            ?(quantity>1?`Confirm ${quantity} Free Tickets`:'Confirm Free Ticket')
-            :(quantity>1&&selectedType?`Pay £${(selectedType.price*quantity/100).toFixed(2)} — ${quantity} Tickets`:'Confirm Purchase'))
-      )
-    )
+    ticketModal
   );
 }
 
@@ -334,7 +385,8 @@ function EventDetail({ event, user, onBack, onRegister }) {
       React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12,marginBottom:40 } },
         event.lineup.map(dj=>React.createElement(FuturisticCard, { key:dj.name,active:dj.role==='Headliner',style:{ textAlign:'center' } },
           React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:'#fff',textTransform:'uppercase',marginBottom:dj.role==='Headliner'?8:0 } }, dj.name),
-          dj.role==='Headliner'&&React.createElement(Chip, { label:'Headliner', color:'#06b6d4' })
+          dj.role==='Headliner'&&React.createElement(Chip, { label:'Headliner', color:'#06b6d4' }),
+          React.createElement(InstagramLink, { handle:dj.instagram })
         ))
       )
     ),
@@ -408,6 +460,7 @@ function InviteModal({ token, onClose }) {
   const [selectedTypeId, setSelectedTypeId] = useState(null);
   const [holderName, setHolderName] = useState('');
   const [holderEmail, setHolderEmail] = useState('');
+  const [quantity, setQuantity] = useState(1);
   const [buying, setBuying] = useState(false);
 
   useEffect(() => {
@@ -422,6 +475,8 @@ function InviteModal({ token, onClose }) {
     }).catch(err => { setError(err.message||'This invite link was not found.'); setLoading(false); });
   }, [token]);
 
+  useEffect(() => { setQuantity(1); }, [selectedTypeId]);
+
   const buy = async () => {
     if (!selectedTypeId) { setError('Please choose a ticket type.'); return; }
     if (!holderName.trim() || !holderEmail.trim()) { setError('Please enter your name and email.'); return; }
@@ -430,7 +485,7 @@ function InviteModal({ token, onClose }) {
       const { url } = await window.RNTECH_API.createCheckoutSession({
         ticketTypeId: selectedTypeId,
         holderName: holderName.trim(), holderEmail: holderEmail.trim(),
-        inviteToken: token,
+        inviteToken: token, quantity,
       });
       window.location.href = url;
     } catch(err) {
@@ -441,6 +496,7 @@ function InviteModal({ token, onClose }) {
 
   const inputStyle = { width:'100%',padding:'12px 16px',marginBottom:12,background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:0,color:'#fff',fontSize:14,fontFamily:"'Space Grotesk',sans-serif",outline:'none',boxSizing:'border-box' };
   const selectedType = invite && invite.ticketTypes ? invite.ticketTypes.find(t=>t.id===selectedTypeId) : null;
+  const maxQty = Math.max(Math.min(10, selectedType?selectedType.remaining:1), 1);
 
   return React.createElement('div', { className:'modal-overlay', style:{ position:'fixed',inset:0,zIndex:600,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20 }, onClick:onClose },
     React.createElement('div', { className:'modal-sheet', onClick:e=>e.stopPropagation(), style:{ background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:36,width:'100%',maxWidth:440,boxShadow:'0 0 60px rgba(50,114,168,0.2)' } },
@@ -472,10 +528,103 @@ function InviteModal({ token, onClose }) {
             )
           )
         ),
+        selectedType && React.createElement('div', { style:{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16 } },
+          React.createElement('span', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:12,textTransform:'uppercase',letterSpacing:'0.06em' } }, 'Quantity'),
+          React.createElement('div', { style:{ display:'flex',alignItems:'center',gap:10,border:'1px solid rgba(255,255,255,0.2)',padding:'4px 10px' } },
+            React.createElement('button', { onClick:()=>setQuantity(q=>Math.max(1,q-1)), disabled:quantity<=1, style:{ background:'none',border:'none',color:quantity<=1?'rgba(255,255,255,0.2)':'#fff',fontSize:16,cursor:quantity<=1?'default':'pointer',fontFamily:"'Space Grotesk',sans-serif",padding:'0 4px' } }, '−'),
+            React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'#fff',fontSize:14,fontWeight:700,minWidth:16,textAlign:'center' } }, quantity),
+            React.createElement('button', { onClick:()=>setQuantity(q=>Math.min(maxQty,q+1)), disabled:quantity>=maxQty, style:{ background:'none',border:'none',color:quantity>=maxQty?'rgba(255,255,255,0.2)':'#fff',fontSize:16,cursor:quantity>=maxQty?'default':'pointer',fontFamily:"'Space Grotesk',sans-serif",padding:'0 4px' } }, '+')
+          )
+        ),
         React.createElement('input', { placeholder:'Your Name',value:holderName,onChange:e=>setHolderName(e.target.value),style:inputStyle }),
         React.createElement('input', { type:'email',placeholder:'Your Email',value:holderEmail,onChange:e=>setHolderEmail(e.target.value),style:inputStyle }),
         error && React.createElement('div', { style:{ color:'#ef4444',fontSize:13,marginBottom:12,fontFamily:"'Space Grotesk',sans-serif" } }, error),
-        React.createElement(GlowButton, { onClick:buy, style:{ width:'100%' }, disabled:buying||!selectedType }, buying?'Redirecting…':'Pay & Claim Ticket')
+        React.createElement(GlowButton, { onClick:buy, style:{ width:'100%' }, disabled:buying||!selectedType },
+          buying?'Redirecting…':selectedType&&quantity>1?`Pay £${(selectedType.discountedPrice*quantity/100).toFixed(2)} — ${quantity} Tickets`:'Pay & Claim Ticket')
+      )
+    )
+  );
+}
+
+/* ─── PERSONAL OFFER (emailed discount link — one person, one use) ─────────── */
+function OfferModal({ token, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [offer, setOffer] = useState(null);
+  const [selectedTypeId, setSelectedTypeId] = useState(null);
+  const [quantity, setQuantity] = useState(1);
+  const [buying, setBuying] = useState(false);
+  const FSG = "'Space Grotesk',sans-serif";
+
+  useEffect(() => {
+    window.RNTECH_API.getOffer(token).then(d => {
+      setOffer(d);
+      if (d.state === 'ok') setSelectedTypeId((d.ticketTypes[0] || {}).id || null);
+      setLoading(false);
+    }).catch(err => { setError(err.message || "This link isn't valid."); setLoading(false); });
+  }, [token]);
+
+  useEffect(() => { setQuantity(1); }, [selectedTypeId]);
+
+  const buy = async () => {
+    if (!selectedTypeId) { setError('Please choose a ticket.'); return; }
+    setBuying(true); setError('');
+    try {
+      const { url } = await window.RNTECH_API.createCheckoutSession({ ticketTypeId:selectedTypeId, offerToken:token, quantity });
+      window.location.href = url;
+    } catch (err) {
+      setError(err.message || 'Failed to start checkout');
+      setBuying(false);
+    }
+  };
+
+  const messages = {
+    used: ['Offer already used', 'This personal offer has already been used. Each link works for one purchase only.'],
+    expired: ['Offer expired', 'This offer has expired.'],
+    revoked: ['Offer unavailable', 'This offer is no longer available.'],
+    sold_out: ['Sold out', 'Everything in this offer has sold out.'],
+    wrong_account: ['This offer is personal', "This link was made for someone else's account, so it can't be used while you're signed in as a different person. Sign out and open the link again only if it's yours."],
+  };
+  const selectedType = offer && offer.ticketTypes ? offer.ticketTypes.find(t => t.id === selectedTypeId) : null;
+  const maxQty = selectedType ? Math.max(Math.min(offer.maxTickets, selectedType.remaining), 1) : 1;
+
+  return React.createElement('div', { className:'modal-overlay', style:{ position:'fixed',inset:0,zIndex:600,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20 }, onClick:onClose },
+    React.createElement('div', { className:'modal-sheet', onClick:e => e.stopPropagation(), style:{ background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:36,width:'100%',maxWidth:440,boxShadow:'0 0 60px rgba(50,114,168,0.2)' } },
+      loading && React.createElement(Spinner),
+      !loading && !offer && React.createElement('div', null,
+        React.createElement('p', { style:{ color:'#ef4444',fontFamily:FSG,marginBottom:20 } }, error || "This link isn't valid."),
+        React.createElement(GlowButton, { onClick:onClose, variant:'ghost' }, 'Close')
+      ),
+      !loading && offer && offer.state !== 'ok' && React.createElement('div', null,
+        React.createElement('h3', { style:{ fontFamily:FSG,fontWeight:800,fontSize:20,color:'#fff',margin:'0 0 12px',textTransform:'uppercase' } }, (messages[offer.state] || messages.revoked)[0]),
+        React.createElement('p', { style:{ fontFamily:FSG,color:'rgba(255,255,255,0.55)',fontSize:14,lineHeight:1.6,marginBottom:24 } }, (messages[offer.state] || messages.revoked)[1]),
+        React.createElement(GlowButton, { onClick:onClose, style:{ width:'100%' } }, 'Close')
+      ),
+      !loading && offer && offer.state === 'ok' && React.createElement('div', null,
+        React.createElement('h3', { style:{ fontFamily:FSG,fontWeight:800,fontSize:22,color:'#fff',margin:'0 0 6px',textTransform:'uppercase' } }, 'Your Personal Offer'),
+        React.createElement('p', { style:{ fontFamily:FSG,color:'rgba(255,255,255,0.4)',fontSize:13,marginBottom:4 } }, offer.event.title + ' · ' + offer.event.displayDate),
+        React.createElement('p', { style:{ fontFamily:FSG,color:'#10b981',fontSize:14,fontWeight:700,marginBottom:6 } }, (offer.firstName ? offer.firstName + ', ' : '') + offer.discountLabel + ' any ticket below'),
+        React.createElement('p', { style:{ fontFamily:FSG,color:'rgba(255,255,255,0.4)',fontSize:12,lineHeight:1.5,marginBottom:16 } }, "This link is personal to you and works once, for up to " + offer.maxTickets + " tickets. Tickets are sent to " + offer.maskedEmail + '.'),
+        React.createElement('div', { style:{ display:'flex',flexDirection:'column',gap:10,marginBottom:20 } },
+          offer.ticketTypes.map(t => React.createElement('div', { key:t.id, onClick:() => setSelectedTypeId(t.id), style:{ background:selectedTypeId===t.id?'rgba(50,114,168,0.15)':'rgba(255,255,255,0.03)',border:`1px solid ${selectedTypeId===t.id?'rgba(50,114,168,0.5)':'rgba(255,255,255,0.08)'}`,padding:'14px 16px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center' } },
+            React.createElement('div', { style:{ fontFamily:FSG,fontWeight:700,fontSize:14,color:'#fff' } }, t.name),
+            React.createElement('div', { style:{ fontFamily:FSG } },
+              React.createElement('span', { style:{ textDecoration:'line-through',color:'rgba(255,255,255,0.4)',marginRight:8,fontSize:13 } }, '£' + (t.price / 100).toFixed(2)),
+              React.createElement('span', { style:{ fontWeight:800,fontSize:16,color:'#10b981' } }, '£' + (t.discountedPrice / 100).toFixed(2))
+            )
+          ))
+        ),
+        selectedType && React.createElement('div', { style:{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16 } },
+          React.createElement('span', { style:{ fontFamily:FSG,color:'rgba(255,255,255,0.5)',fontSize:12,textTransform:'uppercase',letterSpacing:'0.06em' } }, 'Quantity'),
+          React.createElement('div', { style:{ display:'flex',alignItems:'center',gap:10,border:'1px solid rgba(255,255,255,0.2)',padding:'4px 10px' } },
+            React.createElement('button', { onClick:() => setQuantity(q => Math.max(1, q - 1)), disabled:quantity <= 1, style:{ background:'none',border:'none',color:quantity<=1?'rgba(255,255,255,0.2)':'#fff',fontSize:16,cursor:quantity<=1?'default':'pointer',fontFamily:FSG } }, '−'),
+            React.createElement('div', { style:{ fontFamily:FSG,color:'#fff',fontSize:14,fontWeight:700,minWidth:16,textAlign:'center' } }, quantity),
+            React.createElement('button', { onClick:() => setQuantity(q => Math.min(maxQty, q + 1)), disabled:quantity >= maxQty, style:{ background:'none',border:'none',color:quantity>=maxQty?'rgba(255,255,255,0.2)':'#fff',fontSize:16,cursor:quantity>=maxQty?'default':'pointer',fontFamily:FSG } }, '+')
+          )
+        ),
+        error && React.createElement('div', { style:{ color:'#ef4444',fontSize:13,marginBottom:12,fontFamily:FSG } }, error),
+        React.createElement(GlowButton, { onClick:buy, style:{ width:'100%' }, disabled:buying || !selectedType },
+          buying ? 'Redirecting…' : selectedType && quantity > 1 ? `Pay £${(selectedType.discountedPrice * quantity / 100).toFixed(2)} — ${quantity} Tickets` : 'Pay & Claim Ticket')
       )
     )
   );
@@ -537,6 +686,16 @@ function PageTickets({ user, onAuth, checkoutInfo }) {
   if (loading) return React.createElement('div',{style:{padding:'120px 24px'}},React.createElement(Spinner));
 
   const total = tickets.length + interests.length;
+
+  // Group tickets from the same purchase (shared orderId) into one swipeable card;
+  // order-less tickets (e.g. individually-issued invites) each get their own group of one.
+  const ticketGroups = [];
+  const groupByOrder = {};
+  tickets.forEach(t => {
+    const key = t.orderId || t.id;
+    if (!groupByOrder[key]) { groupByOrder[key] = []; ticketGroups.push(groupByOrder[key]); }
+    groupByOrder[key].push(t);
+  });
   return React.createElement('div', { style:{ padding:'100px 24px 100px',maxWidth:700,margin:'0 auto' } },
     React.createElement(SectionHeader, { title:'My Tickets', subtitle:total+' item'+(total!==1?'s':'')+' for '+user.name }),
     checkoutInfo&&checkoutInfo.status==='success'&&React.createElement('div', { style:{ background:'rgba(16,185,129,0.1)',border:'1px solid rgba(16,185,129,0.3)',borderRadius:0,padding:20,marginBottom:32,fontFamily:"'Space Grotesk',sans-serif",color:'#10b981' } },
@@ -551,7 +710,7 @@ function PageTickets({ user, onAuth, checkoutInfo }) {
         )
       : React.createElement('div', { style:{ display:'flex',flexDirection:'column',gap:20 } },
           interests.map(i => React.createElement(WaitlistCard, { key:i.id, interest:i, onBuyNow:setBuyToken })),
-          tickets.map(t => React.createElement(TicketCard, { key:t.id, ticket:t }))
+          ticketGroups.map(group => React.createElement(TicketGroup, { key:group[0].orderId||group[0].id, tickets:group }))
         ),
     buyToken && React.createElement(InviteModal, { token:buyToken, onClose:()=>{ setBuyToken(null); reload(); } })
   );
@@ -613,4 +772,4 @@ function PageContact({ user }) {
   );
 }
 
-Object.assign(window, { PageHome, PageEvents, PageMixes, PageTickets, PageContact, InviteModal });
+Object.assign(window, { PageHome, PageEvents, PageMixes, PageTickets, PageContact, OfferModal, InviteModal });

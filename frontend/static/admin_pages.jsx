@@ -3,6 +3,7 @@ var { useState, useEffect, useRef } = React;
 
 const ADMIN_TABS = [
   { id: 'overview',   label: 'Overview' },
+  { id: 'door',       label: 'Door' },
   { id: 'events',     label: 'Events' },
   { id: 'mixes',      label: 'Mixes' },
   { id: 'guestlist',  label: 'Guest List' },
@@ -1154,6 +1155,215 @@ function GenderResolveModal({ tickets, overrides, onSave, onClose }) {
             React.createElement('button', { onClick:onClose, style:{...FS,background:'none',border:'none',color:'rgba(255,255,255,0.25)',fontSize:12,cursor:'pointer',textTransform:'uppercase',letterSpacing:'0.08em'} }, 'Cancel')
           )
     )
+  );
+}
+
+// ── Door (check-in) ───────────────────────────────────────────────────────────
+// Built for a queue: the whole guest list is loaded once and searched on the phone, so typing is
+// instant even on bad venue wifi — only the check-in tap itself needs the network. People who bought
+// several tickets show as one card. Re-syncs every 15s so two phones on the door agree.
+const DOOR_SYNC_MS = 15000;
+
+function doorMatches(t, terms) {
+  const hay = (t.holderName + ' ' + t.holderEmail + ' ' + t.id + ' ' + t.qrCode).toLowerCase();
+  return terms.every(w => hay.includes(w));
+}
+
+function TabDoor() {
+  const [events, setEvents] = useState([]);
+  const [eventId, setEventId] = useState('');
+  const [tickets, setTickets] = useState(null);
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(null);         // group key being checked in
+  const [flash, setFlash] = useState(null);       // { kind:'in'|'already'|'error', name, detail, ticketIds }
+  const [history, setHistory] = useState([]);     // check-ins made on this phone, newest first
+  const [showScanner, setShowScanner] = useState(false);
+  const [offline, setOffline] = useState(false);
+  const inputRef = useRef(null);
+  const flashTimer = useRef(null);
+
+  useEffect(() => {
+    window.RNTECH_API.getEvents().then(ev => { setEvents(ev); if (ev.length) setEventId(nextUpcomingId(ev)); }).catch(()=>{});
+  }, []);
+
+  const load = (id = eventId) => {
+    if (!id) return Promise.resolve();
+    return window.RNTECH_API.adminTickets(id)
+      .then(t => { setTickets(t.filter(x => x.status !== 'cancelled')); setOffline(false); })
+      .catch(() => setOffline(true));
+  };
+
+  useEffect(() => {
+    if (!eventId) return;
+    setTickets(null); setQuery(''); setHistory([]);
+    load(eventId);
+    const timer = setInterval(() => { if (!document.hidden) load(eventId); }, DOOR_SYNC_MS);
+    return () => clearInterval(timer);
+  }, [eventId]);
+
+  useEffect(() => () => clearTimeout(flashTimer.current), []);
+
+  const showFlash = (f) => {
+    clearTimeout(flashTimer.current);
+    setFlash(f);
+    flashTimer.current = setTimeout(() => setFlash(null), f.kind === 'in' ? 6000 : 8000);
+  };
+
+  // Checks tickets in one by one through the same endpoint the QR scanner uses, so a ticket another
+  // phone already let in comes back as "already in" rather than silently being marked twice.
+  const checkIn = async (group, count) => {
+    const valid = group.tickets.filter(t => t.status === 'valid').slice(0, count);
+    if (!valid.length) return;
+    setBusy(group.key);
+    const done = [], already = [];
+    try {
+      for (const t of valid) {
+        const r = await window.RNTECH_API.checkinByQR(t.qrCode);
+        (r.alreadyUsed ? already : done).push(t.id);
+      }
+      setTickets(prev => prev.map(t => valid.some(v => v.id === t.id) ? { ...t, status:'used' } : t));
+      if (done.length) {
+        setHistory(h => [{ name:group.name, ticketIds:done, at:new Date() }, ...h].slice(0, 30));
+        showFlash({ kind:'in', name:group.name, detail:done.length > 1 ? done.length+' people in' : group.typeLabel, ticketIds:done });
+      } else {
+        showFlash({ kind:'already', name:group.name, detail:'Already checked in on another phone' });
+      }
+      setQuery('');
+      inputRef.current && inputRef.current.focus();
+    } catch (err) {
+      showFlash({ kind:'error', name:group.name, detail:(err.message || 'Check-in failed') + ' — check signal and try again' });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const undo = async (entry) => {
+    try {
+      for (const id of entry.ticketIds) await window.RNTECH_API.updateTicketStatus(id, 'valid');
+      setTickets(prev => prev.map(t => entry.ticketIds.includes(t.id) ? { ...t, status:'valid' } : t));
+      setHistory(h => h.filter(x => x !== entry));
+      setFlash(null);
+    } catch (err) { alert(err.message || 'Undo failed'); }
+  };
+
+  const handleScan = async (code) => {
+    setShowScanner(false);
+    if (!code || !code.trim()) return showFlash({ kind:'error', name:'Scan failed', detail:'Could not read the QR code — try again or search by name' });
+    try {
+      const r = await window.RNTECH_API.checkinByQR(code.trim());
+      if (r.eventId !== eventId) return showFlash({ kind:'error', name:r.holderName, detail:'This ticket is for '+r.eventTitle+', not this event' });
+      if (r.alreadyUsed) return showFlash({ kind:'already', name:r.holderName, detail:'This ticket was already scanned in' });
+      setTickets(prev => prev.map(t => t.id === r.id ? { ...t, status:'used' } : t));
+      setHistory(h => [{ name:r.holderName, ticketIds:[r.id], at:new Date() }, ...h].slice(0, 30));
+      showFlash({ kind:'in', name:r.holderName, detail:r.ticketTypeName, ticketIds:[r.id] });
+      load();
+    } catch (err) {
+      showFlash({ kind:'error', name:'Not found', detail:err.message || 'Invalid ticket' });
+    }
+  };
+
+  const all = tickets || [];
+  const inCount = all.filter(t => t.status === 'used').length;
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const groups = [];
+  if (terms.length && terms.join('').length >= 2) {
+    const byKey = {};
+    all.filter(t => doorMatches(t, terms)).forEach(t => {
+      const key = (t.holderEmail || t.holderName).toLowerCase();
+      if (!byKey[key]) groups.push(byKey[key] = { key, name:t.holderName, email:t.holderEmail, tickets:[] });
+      byKey[key].tickets.push(t);
+    });
+    groups.forEach(g => {
+      g.left = g.tickets.filter(t => t.status === 'valid').length;
+      const types = Array.from(new Set(g.tickets.map(t => t.ticketTypeName)));
+      g.typeLabel = types.join(' + ');
+    });
+    groups.sort((a, b) => (b.left > 0) - (a.left > 0) || a.name.localeCompare(b.name));
+  }
+
+  const flashColors = { in:['#10b981','rgba(16,185,129,0.14)'], already:['#f59e0b','rgba(245,158,11,0.14)'], error:['#ef4444','rgba(239,68,68,0.14)'] };
+  const lastEntry = flash && flash.kind === 'in' ? history.find(h => h.ticketIds === flash.ticketIds) : null;
+
+  return React.createElement('div', { className:'door' },
+    React.createElement('select', { value:eventId, onChange:e=>setEventId(e.target.value), style:{...inputSt,marginBottom:14} },
+      events.map(ev=>React.createElement('option', { key:ev.id, value:ev.id, style:{background:'#040c18'} }, ev.title+(ev.displayDate?' — '+ev.displayDate:'')))
+    ),
+
+    // Live count
+    React.createElement('div', { style:{background:'rgba(6,12,26,0.92)',border:'1px solid rgba(255,255,255,0.08)',padding:'14px 16px',marginBottom:14} },
+      React.createElement('div', { style:{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:10} },
+        React.createElement('div', { style:{...FS,fontSize:30,fontWeight:800,color:'#fff',lineHeight:1} },
+          inCount, React.createElement('span', { style:{fontSize:16,color:'rgba(255,255,255,0.4)',fontWeight:600} }, ' / '+all.length+' in')),
+        React.createElement('div', { style:{...FS,fontSize:11,color:offline?'#ef4444':'rgba(255,255,255,0.35)',textAlign:'right'} },
+          offline ? '● Offline — showing last list' : '● Live')
+      ),
+      React.createElement('div', { style:{height:6,background:'rgba(255,255,255,0.08)',marginTop:10} },
+        React.createElement('div', { style:{height:'100%',width:(all.length?Math.round(inCount/all.length*100):0)+'%',background:'linear-gradient(90deg,#10b981,#06b6d4)',transition:'width 0.4s'} }))
+    ),
+
+    // Search + scan
+    React.createElement('div', { style:{display:'flex',gap:8,marginBottom:14} },
+      React.createElement('input', { ref:inputRef, className:'door-search', type:'search', value:query, onChange:e=>setQuery(e.target.value),
+        placeholder:'Type a name, email or ticket ref…', autoComplete:'off', autoCorrect:'off', autoCapitalize:'none', spellCheck:false, enterKeyHint:'search',
+        style:{...inputSt,marginBottom:0,fontSize:18,padding:'14px 16px',flex:1,minWidth:0,border:'1px solid rgba(50,114,168,0.6)'} }),
+      React.createElement('button', { onClick:()=>setShowScanner(true), 'aria-label':'Scan QR',
+        style:{...FS,flexShrink:0,width:56,background:'rgba(50,114,168,0.15)',border:'1px solid rgba(50,114,168,0.5)',color:'#fff',fontSize:22,cursor:'pointer'} }, '📷')
+    ),
+
+    // Confirmation banner
+    flash && React.createElement('div', { role:'status', style:{display:'flex',alignItems:'center',gap:12,padding:'14px 16px',marginBottom:14,background:flashColors[flash.kind][1],border:'2px solid '+flashColors[flash.kind][0]} },
+      React.createElement('div', { style:{fontSize:30,lineHeight:1,color:flashColors[flash.kind][0]} }, flash.kind==='in'?'✓':flash.kind==='already'?'!':'✕'),
+      React.createElement('div', { style:{flex:1,minWidth:0} },
+        React.createElement('div', { style:{...FS,fontSize:18,fontWeight:800,color:'#fff'} }, flash.kind==='in' ? flash.name+' — in' : flash.kind==='already' ? flash.name+' — already in' : flash.name),
+        React.createElement('div', { style:{...FS,fontSize:13,color:'rgba(255,255,255,0.65)',marginTop:2} }, flash.detail)
+      ),
+      lastEntry && React.createElement('button', { onClick:()=>undo(lastEntry), style:{...FS,flexShrink:0,background:'none',border:'1px solid rgba(255,255,255,0.3)',color:'#fff',padding:'10px 14px',fontSize:12,fontWeight:700,textTransform:'uppercase',cursor:'pointer'} }, 'Undo')
+    ),
+
+    tickets === null && React.createElement(Spinner),
+
+    // Results
+    tickets !== null && terms.join('').length >= 2 && groups.length === 0 &&
+      React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.5)',fontSize:15,padding:'24px 4px',textAlign:'center'} }, 'Nobody matching "'+query.trim()+'" on this list.'),
+    groups.slice(0, 25).map(g => {
+      const total = g.tickets.length, left = g.left;
+      return React.createElement('div', { key:g.key, style:{padding:'14px 16px',marginBottom:10,background:left?'rgba(6,12,26,0.92)':'rgba(6,12,26,0.6)',border:'1px solid '+(left?'rgba(255,255,255,0.12)':'rgba(255,255,255,0.05)')} },
+        React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10} },
+          React.createElement('div', { style:{minWidth:0} },
+            React.createElement('div', { style:{...FS,fontSize:18,fontWeight:800,color:left?'#fff':'rgba(255,255,255,0.5)'} }, g.name),
+            React.createElement('div', { style:{...FS,fontSize:12,color:'rgba(255,255,255,0.45)',marginTop:2,overflowWrap:'anywhere'} }, g.email),
+            React.createElement('div', { style:{...FS,fontSize:13,color:'rgba(255,255,255,0.7)',marginTop:6} },
+              g.typeLabel + (total > 1 ? ' · '+total+' tickets' : ''))
+          ),
+          React.createElement('div', { style:{...FS,flexShrink:0,fontSize:12,fontWeight:800,letterSpacing:'0.06em',textTransform:'uppercase',color:left?'rgba(255,255,255,0.45)':'#10b981'} },
+            left === 0 ? '✓ All in' : total > 1 ? (total-left)+'/'+total+' in' : '')
+        ),
+        left > 0 && React.createElement('div', { style:{display:'flex',gap:8,marginTop:12} },
+          React.createElement('button', { onClick:()=>checkIn(g, 1), disabled:busy===g.key,
+            style:{...FS,flex:2,minHeight:52,background:'#10b981',border:'none',color:'#02130c',fontSize:16,fontWeight:800,letterSpacing:'0.04em',textTransform:'uppercase',cursor:'pointer',opacity:busy===g.key?0.6:1} },
+            busy===g.key ? 'Checking in…' : left > 1 ? 'Check in 1' : 'Check in'),
+          left > 1 && React.createElement('button', { onClick:()=>checkIn(g, left), disabled:busy===g.key,
+            style:{...FS,flex:1,minHeight:52,background:'rgba(16,185,129,0.12)',border:'1px solid rgba(16,185,129,0.5)',color:'#10b981',fontSize:14,fontWeight:800,textTransform:'uppercase',cursor:'pointer'} }, 'All '+left)
+        )
+      );
+    }),
+    groups.length > 25 && React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:13,textAlign:'center'} }, (groups.length-25)+' more — keep typing to narrow it down'),
+
+    // Recent check-ins on this phone
+    !terms.length && history.length > 0 && React.createElement('div', { style:{marginTop:8} },
+      React.createElement('div', { style:{...FS,fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',color:'rgba(255,255,255,0.35)',marginBottom:8} }, 'Checked in on this phone'),
+      history.map((h, i) => React.createElement('div', { key:i, style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(255,255,255,0.06)'} },
+        React.createElement('div', { style:{...FS,fontSize:14,color:'#fff',minWidth:0} },
+          h.name + (h.ticketIds.length > 1 ? ' ×'+h.ticketIds.length : ''),
+          React.createElement('span', { style:{color:'rgba(255,255,255,0.35)',fontSize:12} }, '  '+h.at.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}))),
+        React.createElement('button', { onClick:()=>undo(h), style:{...FS,flexShrink:0,background:'none',border:'1px solid rgba(255,255,255,0.2)',color:'rgba(255,255,255,0.7)',padding:'8px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',cursor:'pointer'} }, 'Undo')
+      ))
+    ),
+    !terms.length && history.length === 0 && tickets !== null &&
+      React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.35)',fontSize:13,lineHeight:1.6,padding:'8px 2px'} },
+        'Start typing someone\'s name — first name, surname, or both in any order. Each check-in clears the search ready for the next person.'),
+
+    showScanner && React.createElement(QRScanModal, { onClose:()=>setShowScanner(false), onScan:handleScan, eventId })
   );
 }
 
@@ -2600,6 +2810,7 @@ function PageAdmin({ user }) {
   const renderTab = () => {
     switch(tab) {
       case 'overview':  return React.createElement(TabOverview);
+      case 'door':      return React.createElement(TabDoor);
       case 'events':    return React.createElement(TabEvents);
       case 'mixes':     return React.createElement(TabMixes);
       case 'guestlist': return React.createElement(TabGuestList);

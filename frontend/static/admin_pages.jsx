@@ -60,9 +60,9 @@ function Modal({ title, onClose, children }) {
   },
     React.createElement('div', { ref:sheetRef, className:'modal-sheet', onMouseDown:e=>e.stopPropagation(), onClick:e=>e.stopPropagation(), style:{background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:32,width:'100%',maxWidth:600,maxHeight:'90vh',overflowY:'auto',boxShadow:'0 0 60px rgba(50,114,168,0.2)'} },
       React.createElement('div',{className:'modal-handle'}),
-      React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:24} },
+      React.createElement('div', { className:'modal-head', style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,marginBottom:24} },
         React.createElement('h3', { style:{...FS,fontWeight:800,fontSize:20,color:'#fff',textTransform:'uppercase',margin:0} }, title),
-        React.createElement('button', { onClick:onClose,style:{background:'none',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',fontSize:20,lineHeight:1} },'×')
+        React.createElement('button', { onClick:onClose,'aria-label':'Close',style:{background:'none',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',fontSize:20,lineHeight:1,flexShrink:0} },'×')
       ),
       children
     )
@@ -89,7 +89,7 @@ function StatCard({ label, value, color, shimmer }) {
         background:shimmer.gradient,backgroundSize:'250% 100%',backgroundClip:'text',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',
         filter:shimmer.glow,animation:'starShimmer 3s linear infinite' }
     : { ...FS,color,fontSize,fontWeight:800,lineHeight:1.15,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' };
-  return React.createElement('div', { style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',padding:'16px 18px',border:`1px solid ${shimmer?'rgba(255,255,255,0.18)':'rgba(255,255,255,0.06)'}`,minWidth:0,boxSizing:'border-box',overflow:'hidden',boxShadow:shimmer?`0 0 20px ${shimmer===PLATINUM_SHIMMER?'rgba(180,235,255,0.15)':'rgba(212,175,55,0.15)'}`:'none'} },
+  return React.createElement('div', { className:'adm-stat', style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',padding:'16px 18px',border:`1px solid ${shimmer?'rgba(255,255,255,0.18)':'rgba(255,255,255,0.06)'}`,minWidth:0,boxSizing:'border-box',overflow:'hidden',boxShadow:shimmer?`0 0 20px ${shimmer===PLATINUM_SHIMMER?'rgba(180,235,255,0.15)':'rgba(212,175,55,0.15)'}`:'none'} },
     React.createElement('div', { style:valueStyle, title:String(value) }, value),
     React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:10,letterSpacing:'0.1em',textTransform:'uppercase',marginTop:6,lineHeight:1.4} }, label)
   );
@@ -112,6 +112,7 @@ function EditableStat({ label, pence, onSave }) {
 
   return React.createElement('div', {
     onClick:()=>!editing && setEditing(true),
+    className:'adm-stat',
     style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',padding:'16px 18px',border:'1px solid rgba(255,255,255,0.06)',minWidth:0,boxSizing:'border-box',overflow:'hidden',cursor:'pointer'}
   },
     editing
@@ -370,7 +371,7 @@ function AdsRangeEditor({ eventId, since, until, onSaved }) {
       .then(() => { setState('saved'); onSaved(); })
       .catch(() => setState('error'));
   };
-  return React.createElement('div', { style:{ display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',marginBottom:20 } },
+  return React.createElement('div', { className:'ads-range', style:{ display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',marginBottom:20 } },
     React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase'} }, 'Ad spend counted from'),
     React.createElement('input', { type:'date', value:from, onChange:e=>{setFrom(e.target.value);setState('idle');}, style:inputStyle }),
     React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:11} }, 'to'),
@@ -528,7 +529,7 @@ function TabOverview() {
   if (!stats) return React.createElement(Spinner);
   return React.createElement('div', null,
     React.createElement(SaleNotifications),
-    React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16,marginBottom:40} },
+    React.createElement('div', { className:'adm-counts', style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16,marginBottom:40} },
       React.createElement(StatCard, { label:'Events', value:stats.events, color:'#3272a8' }),
       React.createElement(StatCard, { label:'Tickets Issued', value:stats.tickets, color:'#10b981' }),
       React.createElement(StatCard, { label:'Members', value:stats.users, color:'#06b6d4' }),
@@ -764,7 +765,7 @@ function TabEvents() {
     // Ticket Types modal
     selectedEvent&&React.createElement(Modal, { title:'Ticket Types — '+selectedEvent.title, onClose:()=>{ setSelectedEvent(null); setEditingTt(null); } },
       ticketTypes.length>0&&React.createElement('div', { style:{marginBottom:20} },
-        ticketTypes.map(tt=>React.createElement('div', { key:tt.id,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 0',borderBottom:'1px solid rgba(255,255,255,0.06)',background:editingTt&&editingTt.id===tt.id?'rgba(50,114,168,0.08)':'transparent'} },
+        ticketTypes.map(tt=>React.createElement('div', { key:tt.id,style:{display:'flex',flexWrap:'wrap',gap:10,justifyContent:'space-between',alignItems:'center',padding:'12px 0',borderBottom:'1px solid rgba(255,255,255,0.06)',background:editingTt&&editingTt.id===tt.id?'rgba(50,114,168,0.08)':'transparent'} },
           React.createElement('div', null,
             React.createElement('div', { style:{display:'flex',alignItems:'center',gap:8} },
               React.createElement('div', { style:{...FS,color:'#fff',fontWeight:700,fontSize:14} }, tt.name),
@@ -778,7 +779,7 @@ function TabEvents() {
               )+' · '+tt.soldCount+'/'+tt.capacity+' sold'
             )
           ),
-          React.createElement('div', { style:{display:'flex',gap:6} },
+          React.createElement('div', { className:'adm-btnrow', style:{display:'flex',gap:6,flexWrap:'wrap'} },
             React.createElement(GlowButton, { small:true,variant:tt.soldOut?'ghost':'danger',onClick:()=>toggleSoldOut(tt) }, tt.soldOut?'Unmark Sold Out':'Mark Sold Out'),
             React.createElement(GlowButton, { small:true,variant:'ghost',onClick:()=>openEditTt(tt) },'Edit'),
             React.createElement(GlowButton, { small:true,variant:'danger',onClick:()=>delTicketType(tt.id) },'Remove')
@@ -1739,7 +1740,7 @@ function EmailDashboard({ onEdit, onChanged }) {
       React.createElement('div', { style:{...FS,color:HEALTH_STYLE[c.health].color,fontWeight:800,fontSize:13,marginBottom:4} }, (c.health==='blocked'?'⚠ ':'')+ c.name + ' — ' + HEALTH_STYLE[c.health].label),
       React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.75)',fontSize:12,lineHeight:1.5} }, c.healthMessage)
     )),
-    React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16,marginBottom:20} },
+    React.createElement('div', { className:'adm-counts', style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16,marginBottom:20} },
       React.createElement(StatCard, { label:'Sent Today', value:data.totals.sentToday, color:'#10b981' }),
       React.createElement(StatCard, { label:'Sent Last Hour', value:data.totals.sentLastHour, color:'#06b6d4' }),
       React.createElement(StatCard, { label:'Last Email Went Out', value:fmtAgo(data.totals.lastSentAt, nowMs), color:data.totals.lastSentAt?'#3272a8':'#64748b' }),
@@ -2485,7 +2486,7 @@ function TabInbox() {
   const isSentView = view === 'sent';
 
   return React.createElement('div', { style:{marginTop:24} },
-    React.createElement('div', { style:{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16} },
+    React.createElement('div', { className:'inbox-toolbar', style:{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, flexWrap:'wrap', marginBottom:16} },
       React.createElement('div', { style:{display:'flex', gap:4} },
         React.createElement('button', { onClick:()=>switchView('inbox'), style:tabBtnSt(view==='inbox') }, 'Inbox'+(emails ? ` (${emails.filter(e=>e.unread).length})` : '')),
         React.createElement('button', { onClick:()=>switchView('junk'), style:tabBtnSt(view==='junk') }, 'Junk'+(junkEmails ? ` (${junkEmails.filter(e=>e.unread).length})` : '')),
@@ -2511,8 +2512,9 @@ function TabInbox() {
             React.createElement('button', { onClick:()=>setComposing(false), style:{...btnSt(false)} }, 'Cancel')
           )
         )
-      : React.createElement('div', { style:panelSt },
-          React.createElement('div', { style:listSt },
+      // On phones this collapses to one pane: the list, or the open message with a back button (see .inbox-panel CSS)
+      : React.createElement('div', { className:'inbox-panel', 'data-open':selected?'1':'0', style:panelSt },
+          React.createElement('div', { className:'inbox-list', style:listSt },
             !activeList || activeList.length === 0
               ? React.createElement('div', { style:{padding:24, color:'rgba(255,255,255,0.3)', fontFamily:'sans-serif', fontSize:13} }, loading ? 'Loading...' : (isSentView ? 'No sent emails' : view === 'junk' ? 'No junk emails' : 'No emails'))
               : activeList.map(e =>
@@ -2528,15 +2530,16 @@ function TabInbox() {
                   )
                 )
           ),
-          React.createElement('div', { style:viewSt },
+          React.createElement('div', { className:'inbox-view', style:viewSt },
+            selected && React.createElement('button', { className:'inbox-back', onClick:()=>{ setSelected(null); setMsg(null); setReplyOpen(false); }, style:{...FS, display:'none', background:'none', border:'none', color:'#3272a8', fontSize:14, fontWeight:700, cursor:'pointer', padding:'0 0 14px'} }, '← Back to '+(view==='sent'?'Sent':view==='junk'?'Junk':'Inbox')),
             !selected
               ? React.createElement('div', { style:{color:'rgba(255,255,255,0.2)', fontFamily:'sans-serif', fontSize:13, paddingTop:40, textAlign:'center'} }, 'Select an email to read')
               : !msg
               ? React.createElement('div', { style:{color:'rgba(255,255,255,0.3)', fontFamily:'sans-serif', fontSize:13} }, 'Loading...')
               : React.createElement('div', null,
                   React.createElement('div', { style:{marginBottom:16} },
-                    React.createElement('div', { style:{...FS, fontSize:15, fontWeight:700, color:'#fff', marginBottom:8} }, msg.subject),
-                    React.createElement('div', { style:{fontFamily:'sans-serif', fontSize:12, color:'rgba(255,255,255,0.4)', marginBottom:2} }, isSentView ? `To: ${msg.to}` : `From: ${msg.from}`),
+                    React.createElement('div', { style:{...FS, fontSize:15, fontWeight:700, color:'#fff', marginBottom:8, overflowWrap:'anywhere'} }, msg.subject),
+                    React.createElement('div', { style:{fontFamily:'sans-serif', fontSize:12, color:'rgba(255,255,255,0.4)', marginBottom:2, overflowWrap:'anywhere'} }, isSentView ? `To: ${msg.to}` : `From: ${msg.from}`),
                     React.createElement('div', { style:{fontFamily:'sans-serif', fontSize:12, color:'rgba(255,255,255,0.3)'} }, `Date: ${msg.date}`)
                   ),
                   React.createElement('div', { style:{borderTop:'1px solid rgba(255,255,255,0.08)', paddingTop:16, marginBottom:16} },
@@ -2566,8 +2569,31 @@ function TabInbox() {
 }
 
 // ── Main Admin Page ───────────────────────────────────────────────────────────
+// Phones show every admin table as stacked cards (see the .adm-root CSS in index.html). Each cell needs
+// its column name to label itself there, so it's copied from the header row — every table gets the
+// mobile layout without its own per-table markup.
+function useTableCellLabels(ref) {
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const label = () => root.querySelectorAll('table').forEach(tbl => {
+      const heads = Array.from(tbl.querySelectorAll('thead th')).map(th => th.textContent.trim());
+      tbl.querySelectorAll('tbody tr').forEach(tr => Array.from(tr.children).forEach((td, i) => {
+        const h = heads[i] || '';
+        if (td.getAttribute('data-label') !== h) td.setAttribute('data-label', h);
+      }));
+    });
+    label();
+    const mo = new MutationObserver(label);   // childList only, so setting attributes can't re-trigger it
+    mo.observe(root, { childList:true, subtree:true });
+    return () => mo.disconnect();
+  }, []);
+}
+
 function PageAdmin({ user }) {
   const [tab, setTab] = useState('overview');
+  const rootRef = useRef(null);
+  useTableCellLabels(rootRef);
 
   if (!user || user.role !== 'admin') return React.createElement('div', { style:{padding:'100px 24px',textAlign:'center',...FS,color:'rgba(255,255,255,0.5)'} }, 'Admin access required.');
 
@@ -2588,8 +2614,8 @@ function PageAdmin({ user }) {
     }
   };
 
-  return React.createElement('div', { style:{padding:'100px 24px 100px',maxWidth:1100,margin:'0 auto'} },
-    React.createElement(SectionHeader, { title:'Admin', subtitle:'RNTECH Management Panel' }),
+  return React.createElement('div', { ref:rootRef, className:'adm-root', style:{padding:'100px 24px 100px',maxWidth:1100,margin:'0 auto'} },
+    React.createElement('div', { className:'adm-header' }, React.createElement(SectionHeader, { title:'Admin', subtitle:'RNTECH Management Panel' })),
     React.createElement(TabBar, { tabs:ADMIN_TABS, active:tab, onChange:setTab }),
     renderTab()
   );

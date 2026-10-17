@@ -52,6 +52,7 @@
     ::-webkit-scrollbar-thumb { background: rgba(50,114,168,0.3); border-radius: 2px; }
     input, textarea, select, button { font-family: 'Space Grotesk', sans-serif; }
     .admin-tabbar::-webkit-scrollbar { display: none; }
+    @media (min-width: 681px) { .admin-tabbar { flex-wrap: wrap; } }
 
     @keyframes btnGlow {
       0%   { background-position: 0% 50%; }
@@ -107,6 +108,117 @@
       .name-row { grid-template-columns: 1fr !important; }
     }
     .page-enter { animation: fadeIn 0.35s ease forwards; }
+
+    /* ── Admin on phones ──────────────────────────────────────────────────────
+       The admin panel is built desktop-first with inline styles, so these overrides
+       need !important. Tables become labelled cards (labels come from useTableCellLabels). */
+    @media (max-width: 680px) {
+      .adm-root { padding: 80px 14px 110px !important; }
+      .adm-header > div { margin-bottom: 12px !important; }
+      .adm-header h2 { font-size: 20px !important; }
+      .adm-header p { font-size: 12px !important; margin-top: 4px !important; }
+
+      /* Tab bar sticks under the top nav so switching sections never means scrolling back up */
+      .admin-tabbar {
+        position: sticky; top: 72px; z-index: 50;
+        margin: 0 -14px 18px !important; padding: 0 6px !important;
+        background: rgba(4,8,18,0.96); backdrop-filter: blur(14px);
+        -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+                mask-image: linear-gradient(90deg, #000 88%, transparent);
+      }
+      .admin-tabbar button { padding: 14px 12px !important; font-size: 12px !important; }
+
+      /* 16px stops iOS Safari zooming the page on every field tap */
+      .adm-root input:not([type=checkbox]):not([type=radio]), .adm-root select, .adm-root textarea,
+      .modal-sheet input:not([type=checkbox]):not([type=radio]), .modal-sheet select, .modal-sheet textarea {
+        font-size: 16px !important; max-width: 100%;
+      }
+      .adm-root input:not([type=checkbox]):not([type=radio]):not([type=file]), .adm-root select { min-height: 44px; }
+      .adm-root input[type=checkbox] { width: 20px !important; height: 20px !important; }
+
+      /* Toolbars of filters/buttons: full-width search and selects instead of odd fixed widths */
+      .adm-root select, .adm-root input[placeholder*="earch"] { width: 100% !important; min-width: 0 !important; flex: 1 1 100% !important; }
+      .adm-root button, .adm-root a { -webkit-tap-highlight-color: transparent; }
+      .adm-root div:has(> input[placeholder*="earch"]) { flex-wrap: wrap; }
+
+      /* Long emails / names wrap instead of pushing things off-screen */
+      .adm-root { overflow-wrap: anywhere; }
+
+      /* Tables → cards */
+      .adm-root div:has(> table) { overflow: visible !important; background: rgba(6,12,26,0.92) !important; }
+      .adm-root table, .adm-root tbody, .adm-root tr, .adm-root td { display: block; width: 100% !important; }
+      .adm-root thead { display: none; }
+      .adm-root tbody tr {
+        position: relative; padding: 14px 14px 12px;
+        border-bottom: 1px solid rgba(255,255,255,0.08) !important; background: transparent !important;
+      }
+      .adm-root td {
+        display: flex !important; flex-wrap: wrap; align-items: baseline; gap: 2px 10px;
+        padding: 3px 0 !important; border: none !important; text-align: left !important;
+        white-space: normal !important; font-size: 13px !important; min-height: 0 !important;
+      }
+      .adm-root td[data-label]:not([data-label=""])::before {
+        content: attr(data-label); flex: 0 0 92px;
+        font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+        color: rgba(255,255,255,0.35);
+      }
+      .adm-root td:empty { display: none !important; }
+      /* First column is the row's title */
+      .adm-root td:first-child { font-size: 15px !important; font-weight: 700; color: #fff !important; padding-bottom: 6px !important; padding-right: 36px !important; }
+      .adm-root td:first-child::before { display: none !important; }
+      /* Row checkbox column (waitlist) floats top-right; the next column becomes the title */
+      .adm-root td:first-child:has(> input[type=checkbox]) { position: absolute; top: 12px; right: 12px; width: auto !important; padding: 0 !important; }
+      .adm-root td:first-child:has(> input[type=checkbox]) + td { font-size: 15px !important; font-weight: 700; color: #fff !important; padding-right: 36px !important; }
+      .adm-root td:first-child:has(> input[type=checkbox]) + td::before { display: none !important; }
+      .adm-root td:first-child:empty + td { font-size: 15px !important; font-weight: 700; color: #fff !important; padding-bottom: 6px !important; }
+      .adm-root td:first-child:empty + td::before { display: none !important; }
+      /* Action cells: full row of proper thumb-sized buttons */
+      .adm-root td:has(button), .adm-root td:has(select) { gap: 8px; padding-top: 10px !important; }
+      .adm-root td:has(button)::before { display: none !important; }
+      .adm-root td button { min-height: 40px; padding: 8px 14px !important; font-size: 12px !important; flex: 1 1 auto; }
+
+      /* Inbox: one pane at a time — the list, or the open message */
+      .inbox-toolbar > div:last-child { margin-left: auto; }
+      .inbox-panel { flex-direction: column; min-height: 0 !important; }
+      .inbox-list { width: 100% !important; max-height: none !important; border-right: none !important; }
+      .inbox-view { padding: 16px !important; max-height: none !important; }
+      .inbox-panel[data-open="0"] .inbox-view { display: none; }
+      .inbox-panel[data-open="1"] .inbox-list { display: none; }
+      .inbox-back { display: block !important; }
+      .inbox-view iframe { min-height: 420px !important; }
+
+      /* Stat tiles: tighter, and plain counts go three-across so the numbers fit on one screen */
+      .adm-root [style*="display: grid"] { gap: 10px !important; }
+      .adm-stat { padding: 12px 12px !important; }
+      .adm-counts { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; margin-bottom: 24px !important; }
+      .adm-counts .adm-stat > div:first-child { font-size: 24px !important; }
+      .adm-counts .adm-stat > div:last-child { font-size: 9px !important; letter-spacing: 0.06em !important; }
+      .ads-range > span:first-child { flex-basis: 100%; }
+      .ads-range input { flex: 1 1 0; min-width: 0; }
+      .ads-range button { min-height: 44px; padding: 0 16px !important; }
+
+      /* Modals become bottom sheets above both nav bars. Pages render inside <main>'s stacking
+         context (z-index 1), so a modal can't out-rank the fixed navs — hide them while one is open. */
+      body:has(.modal-overlay) nav, body:has(.modal-overlay) .mobile-nav { display: none !important; }
+      .modal-overlay { padding: 0 !important; align-items: flex-end !important; }
+      .modal-sheet, .modal-overlay > div[style*="max-width"] {
+        max-width: 100% !important; width: 100% !important; max-height: 92dvh !important; overflow-y: auto !important;
+        border-left: none !important; border-right: none !important; border-bottom: none !important;
+        padding: 18px 16px calc(24px + env(safe-area-inset-bottom)) !important;
+      }
+      /* Title + close stay pinned while a long form scrolls */
+      .modal-head {
+        position: sticky; top: -18px; z-index: 5;
+        margin: -18px -16px 16px !important; padding: 16px 16px 12px;
+        background: #040c18; border-bottom: 1px solid rgba(255,255,255,0.06);
+      }
+      .modal-head h3 { font-size: 16px !important; }
+      .modal-head button { font-size: 28px !important; min-width: 44px; min-height: 44px; margin-right: -10px; }
+      .modal-sheet button[type=submit] { min-height: 48px; }
+      .adm-btnrow { width: 100%; }
+      .adm-btnrow > button { flex: 1 1 auto; min-height: 40px; }
+      .modal-sheet [style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+    }
 
     nav {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
@@ -171,7 +283,7 @@
       border-radius: 14px;
       color: rgba(255,255,255,0.4);
       font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
-      padding: 6px 14px; transition: color 0.2s ease, transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+      padding: 6px 10px; transition: color 0.2s ease, transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
     }
     .mobile-nav-item.active {
       color: #fff; transform: translateY(-2px);

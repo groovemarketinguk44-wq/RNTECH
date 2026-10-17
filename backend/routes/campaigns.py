@@ -973,7 +973,20 @@ _BOUNCE_SEARCHES = [
     ("SUBJECT", '"Undeliverable"'), ("SUBJECT", '"Undelivered"'),
     ("SUBJECT", '"Delivery Status Notification"'), ("SUBJECT", '"Mail delivery failed"'),
     ("SUBJECT", '"Returned mail"'), ("SUBJECT", '"failure notice"'),
+    ("SUBJECT", '"Address not found"'), ("SUBJECT", '"not delivered"'), ("SUBJECT", '"Delivery has failed"'),
+    ("SUBJECT", '"Delivery Failure"'), ("SUBJECT", '"Mail Delivery"'),
 ]
+
+
+def _bounce_folders(mail) -> list:
+    """INBOX plus any junk/spam folder — providers often file bounce notices as junk."""
+    folders = ["INBOX"]
+    typ, data = mail.list()
+    for line in (data or []) if typ == "OK" else []:
+        name = line.decode(errors="ignore").rsplit(' "/" ', 1)[-1].strip().strip('"')
+        if any(w in name.lower() for w in ("junk", "spam")):
+            folders.append(name)
+    return folders
 
 
 def _message_text(raw: bytes) -> str:
@@ -1017,19 +1030,22 @@ def scan_bounces(db: Session) -> int:
     from .inbox_routes import _imap
     mail = _imap()
     try:
-        mail.select("INBOX")
         since = cutoff.strftime("%d-%b-%Y")
-        uids = set()
-        for field, needle in _BOUNCE_SEARCHES:
-            typ, data = mail.search(None, "SINCE", since, field, needle)
-            if typ == "OK" and data and data[0]:
-                uids.update(data[0].split())
         marked = 0
-        for uid in sorted(uids)[-300:]:
-            typ, msg_data = mail.fetch(uid, "(BODY.PEEK[])")
-            if typ != "OK" or not msg_data or not msg_data[0]:
+        for folder in _bounce_folders(mail):
+            # readonly: scanning must never mark the user's mail as read or move it
+            if mail.select(f'"{folder}"', readonly=True)[0] != "OK":
                 continue
-            marked += mark_bounces_in_text(db, _message_text(msg_data[0][1]), recent)
+            uids = set()
+            for field, needle in _BOUNCE_SEARCHES:
+                typ, data = mail.search(None, "SINCE", since, field, needle)
+                if typ == "OK" and data and data[0]:
+                    uids.update(data[0].split())
+            for uid in sorted(uids, key=int)[-300:]:
+                typ, msg_data = mail.fetch(uid, "(BODY.PEEK[])")
+                if typ != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
+                    continue
+                marked += mark_bounces_in_text(db, _message_text(msg_data[0][1]), recent)
         db.commit()
         return marked
     finally:

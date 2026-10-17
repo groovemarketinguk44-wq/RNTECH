@@ -65,11 +65,20 @@ def offer_problem(db: Session, offer: PersonalOffer, now: datetime) -> Optional[
 
 
 def get_or_create_offer(db: Session, campaign: EmailCampaign, user: User) -> PersonalOffer:
-    """The one link for this person in this campaign. Created the first time it's needed, then reused
-    (a retried send must carry the same link, never mint a second discount)."""
+    """The one link for this person in this campaign — or their still-valid link for the same event and
+    discount from an earlier campaign. Created only when neither exists, then reused (a retried send must
+    carry the same link, never mint a second discount)."""
     offer = db.query(PersonalOffer).filter(
         PersonalOffer.campaign_id == campaign.id, PersonalOffer.user_id == user.id).first()
     if offer:
+        return offer
+    # Same person, same event, same discount, still unused from an earlier campaign (e.g. a follow-up email):
+    # hand them the link they already have rather than a second discount link.
+    offer = db.query(PersonalOffer).filter(
+        PersonalOffer.user_id == user.id, PersonalOffer.event_id == campaign.offer_event_id,
+        PersonalOffer.discount_bp == (campaign.offer_discount_bp or 0), PersonalOffer.status == "unused",
+    ).order_by(PersonalOffer.created_at).first()
+    if offer and not offer_problem(db, offer, datetime.utcnow()):
         return offer
     offer = PersonalOffer(
         token=secrets.token_urlsafe(32), campaign_id=campaign.id, user_id=user.id,

@@ -116,6 +116,18 @@ def _round_campaigns(db: Session, round_name: str):
     return sorted(camps, key=key)
 
 
+def _bounced_addresses(db: Session) -> set:
+    """Addresses that have hard-bounced before — emailing them again only hurts the sender reputation."""
+    return {e.lower() for (e,) in db.query(EmailSend.to_email).filter(
+        EmailSend.bounced_at.isnot(None), EmailSend.to_email.isnot(None)).distinct().all()}
+
+
+def _has_offer_ticket(c: EmailCampaign, uid: str, ticketed: dict) -> bool:
+    """Already holds a ticket to the event this campaign is selling — don't chase them (and never hand a
+    discount to someone who just paid full price)."""
+    return bool(c.offer_event_id) and uid in ticketed.get(c.offer_event_id, ())
+
+
 def _plan_round(db: Session, round_name: str):
     """Returns (ordered campaigns, {campaign_id: {"existing": [users], "new": [users]}}).
 
@@ -126,6 +138,7 @@ def _plan_round(db: Session, round_name: str):
     ticketed, attended = _ticket_sets(db)
     attended_any = set().union(*attended.values()) if attended else set()
     users = db.query(User).filter(User.role == "user", User.subscribed == True).order_by(User.created_at, User.id).all()
+    bounced = _bounced_addresses(db)
 
     plan = {c.id: {"existing": [], "new": []} for c in camps}
     claimed = {}
@@ -138,7 +151,9 @@ def _plan_round(db: Session, round_name: str):
             plan[claimed[u.id]]["existing"].append(u)
     for c in camps:
         for u in users:
-            if u.id not in claimed and _matches(c, u.id, ticketed, attended, attended_any):
+            if u.id in claimed or (u.email or "").lower() in bounced or _has_offer_ticket(c, u.id, ticketed):
+                continue
+            if _matches(c, u.id, ticketed, attended, attended_any):
                 claimed[u.id] = c.id
                 plan[c.id]["new"].append(u)
     return camps, plan
@@ -894,6 +909,11 @@ def _send_next(db: Session, c: EmailCampaign, now: datetime) -> int:
         return 0
     if _already_emailed_in_round(db, c, user.id):
         send.status = "skipped"          # belt and braces: nobody gets two campaigns from one round
+        db.commit()
+        return 0
+    if c.offer_event_id and db.query(Ticket).filter(Ticket.user_id == user.id, Ticket.event_id == c.offer_event_id,
+                                                    Ticket.status != "cancelled").first():
+        send.status = "skipped"          # bought a ticket while the round was going out — no need to chase them
         db.commit()
         return 0
 

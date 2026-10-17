@@ -15,7 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..database import get_db
-from ..models import EmailCampaign, EmailSend, User, Ticket, Event, PersonalOffer
+from ..models import EmailCampaign, EmailSend, User, Ticket, Event, PersonalOffer, TicketType
 from .offers import get_or_create_offer, offer_url, ticket_prices_html, discount_label
 from ..auth import require_admin, SECRET_KEY
 from ..email_service import send_email, send_email_result, build_email_html, SMTP_USER
@@ -246,7 +246,20 @@ def _in_window(c: EmailCampaign, now: datetime) -> bool:
     return (c.window_start_hour or 0) <= _london(now).hour < (c.window_end_hour or 24)
 
 
-def _health(c: EmailCampaign, counts: dict, sent_today: int, now: datetime, mailbox_sent: int, mailbox_budget: int):
+def _sold_out(tt: Optional[TicketType]) -> bool:
+    return bool(tt) and (bool(tt.sold_out) or (tt.sold_count or 0) >= (tt.capacity or 0))
+
+
+def _waiting_on_sell_out(db: Session, c: EmailCampaign) -> Optional[TicketType]:
+    """The ticket type this queued campaign is still waiting to sell out, or None if it's free to start."""
+    if not c.start_when_sold_out:
+        return None
+    tt = db.query(TicketType).filter(TicketType.id == c.start_when_sold_out).first()
+    return None if (not tt or _sold_out(tt)) else tt
+
+
+def _health(c: EmailCampaign, counts: dict, sent_today: int, now: datetime, mailbox_sent: int, mailbox_budget: int,
+            waiting_on: Optional[TicketType] = None):
     """(level, message) where level is ok | idle | warning | blocked."""
     if c.send_status == "running" and mailbox_sent >= mailbox_budget:
         return "ok", (f"Today's mailbox limit ({mailbox_sent}/{mailbox_budget} emails — this counts EVERYTHING "
@@ -255,6 +268,9 @@ def _health(c: EmailCampaign, counts: dict, sent_today: int, now: datetime, mail
     if c.send_status == "draft":
         return "idle", "Draft — nothing has been sent."
     if c.send_status == "queued":
+        if waiting_on:
+            left = max((waiting_on.capacity or 0) - (waiting_on.sold_count or 0), 0)
+            return "idle", f"Queued — starts automatically once {waiting_on.name} sells out ({left} left)."
         if c.start_at and c.start_at > now:
             return "idle", f"Queued — set to start {_london(c.start_at).strftime('%a %d %b, %H:%M')} UK."
         return "idle", "Queued — starts automatically when the campaign before it finishes."
@@ -287,7 +303,8 @@ def _campaign_dict(c: EmailCampaign, db: Session, now: Optional[datetime] = None
     audience_size = counts["queued"] if counts["queued"] else (len(_audience_users(db, c)) if broadcast else 0)
     today = _sent_today(db, now) if broadcast else 0
     mailbox_sent, mailbox_budget = (emails_sent_today(db), daily_budget(db)) if broadcast else (0, 0)
-    level, message = _health(c, counts, today, now, mailbox_sent, mailbox_budget) if broadcast else ("ok", "")
+    waiting_on = _waiting_on_sell_out(db, c) if c.send_status == "queued" else None
+    level, message = _health(c, counts, today, now, mailbox_sent, mailbox_budget, waiting_on) if broadcast else ("ok", "")
     return {
         "id": c.id, "name": c.name, "subject": c.subject,
         "bodyHtml": c.body_html, "delayDays": c.delay_days,
@@ -296,6 +313,7 @@ def _campaign_dict(c: EmailCampaign, db: Session, now: Optional[datetime] = None
         "audience": c.audience or "drip", "audienceEventId": c.audience_event_id,
         "audienceEventTitle": _event_title(db, c.audience_event_id),
         "roundName": c.round_name or "default", "queuePosition": c.queue_position or 0, "startAt": _iso(c.start_at),
+        "startWhenSoldOut": c.start_when_sold_out, "waitingOnTicketType": waiting_on.name if waiting_on else None,
         "sendStatus": c.send_status or "draft", "gapMinutes": c.gap_minutes, "dailyCap": c.daily_cap,
         "windowStartHour": c.window_start_hour, "windowEndHour": c.window_end_hour,
         "audienceSize": audience_size, "counts": counts, "sentToday": today,
@@ -559,6 +577,7 @@ def _next_position(db: Session, round_name: str) -> int:
 class RoundQueueIn(BaseModel):
     round: str = "default"
     startAt: Optional[str] = None
+    startWhenSoldOut: Optional[str] = None   # ticket type id: hold the whole round until it sells out
 
 
 @router.post("/admin/rounds/queue")
@@ -571,11 +590,15 @@ def queue_round(data: RoundQueueIn, db: Session = Depends(get_db), _=Depends(req
     if not any(plan[c.id]["existing"] or plan[c.id]["new"] for c in drafts):
         raise HTTPException(400, "Nobody is in any of these campaigns' audiences")
     start = _parse_start(data.startAt)
+    if data.startWhenSoldOut and not db.query(TicketType).filter(TicketType.id == data.startWhenSoldOut).first():
+        raise HTTPException(400, "Ticket type not found")
     pos = _next_position(db, data.round or "default")
     for i, c in enumerate(drafts):
         c.send_status = "queued"
         c.queue_position = pos + i
         c.start_at = start if i == 0 else None
+        # Only the first campaign carries the trigger — the rest follow it in order, as with start_at.
+        c.start_when_sold_out = data.startWhenSoldOut if i == 0 else None
         c.pause_reason = None
     db.commit()
     return {"queued": [c.name for c in drafts]}
@@ -603,6 +626,7 @@ def unqueue_campaign(campaign_id: str, db: Session = Depends(get_db), _=Depends(
     c.send_status = "draft"
     c.queue_position = 0
     c.start_at = None
+    c.start_when_sold_out = None
     db.commit()
     return _campaign_dict(c, db)
 
@@ -845,8 +869,10 @@ def _advance_queues(db: Session, now: datetime):
             nxt = db.query(EmailCampaign).filter(
                 EmailCampaign.audience != "drip", EmailCampaign.round_name == rn, EmailCampaign.send_status == "queued"
             ).order_by(EmailCampaign.queue_position, EmailCampaign.created_at).first()
-            if not nxt or (nxt.start_at and nxt.start_at > now):
+            if not nxt or (nxt.start_at and nxt.start_at > now) or _waiting_on_sell_out(db, nxt):
                 break
+            if nxt.start_when_sold_out:
+                logger.info(f"Round '{rn}': trigger ticket type sold out — starting '{nxt.name}'")
             _queue_audience(db, nxt)
             db.flush()
             if db.query(EmailSend).filter(EmailSend.campaign_id == nxt.id, EmailSend.status == "pending").count() == 0:

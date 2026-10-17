@@ -230,6 +230,7 @@ class EmailCampaign(Base):
     round_name = Column(String, default="default")       # campaigns in one round never email the same person and run one after another
     queue_position = Column(Integer, default=0)          # send order inside a round once queued
     start_at = Column(DateTime, nullable=True)           # queued campaign won't begin before this (UTC)
+    start_when_sold_out = Column(String, nullable=True)  # ticket type id — queued campaign waits until it sells out
     audience_event_id = Column(String, nullable=True)    # event whose ticket buyers are emailed (event_buyers)
     send_status = Column(String, default="draft")        # draft | running | paused | completed
     gap_minutes = Column(Integer, default=20)            # average gap between two emails (jittered ±25%)

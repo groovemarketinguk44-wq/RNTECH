@@ -157,6 +157,7 @@ class TicketOrder(Base):
     status = Column(String, default="pending")  # pending | paid | failed_capacity | cancelled
     guest_account_created = Column(Boolean, default=False)
     offer_id = Column(String, nullable=True)   # PersonalOffer this order redeemed, if any
+    promo_id = Column(String, nullable=True)   # PromoLink (public QR discount) this order used, if any
     client_ip = Column(String, nullable=True)
     client_user_agent = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -306,3 +307,16 @@ class PersonalOffer(Base):
     reserved_until = Column(DateTime, nullable=True)
 
     user = relationship("User")
+
+
+class PromoLink(Base):
+    """A public discount link (e.g. printed as a QR code). Anyone with it gets the discount while it's
+    switched on; switching it off makes the link fall back to normal full-price /buy."""
+    __tablename__ = "promo_links"
+
+    id = Column(String, primary_key=True, default=lambda: _uid("promo-"))
+    code = Column(String, unique=True, nullable=False, index=True)
+    label = Column(String, default="")
+    discount_bp = Column(Integer, default=3333)   # basis points — 3333 = 1/3 off
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -12,6 +12,7 @@ const ADMIN_TABS = [
   { id: 'campaigns',  label: 'Email Campaigns' },
   { id: 'inbox',      label: 'Inbox' },
   { id: 'sponsors',   label: 'Sponsors' },
+  { id: 'qrlinks',    label: 'QR Links' },
 ];
 
 // Pick the nearest upcoming event from a date-DESC list
@@ -2105,6 +2106,73 @@ function TabSponsors() {
   );
 }
 
+// ── QR Links ──────────────────────────────────────────────────────────────────
+// Public discount links for QR codes. Each works like /buy (opens the featured event's tickets) with the
+// discount applied while it's switched on. Switched off, the same QR still works — just at full price.
+function TabQrLinks() {
+  const [promos, setPromos] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ code:'', label:'', discountPercent:'33.33' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(null);
+
+  const load = () => window.RNTECH_API.adminGetPromos().then(setPromos).catch(()=>{});
+  useEffect(()=>{ load(); },[]);
+
+  const create = async (e) => {
+    e.preventDefault(); setSaving(true); setError('');
+    try {
+      await window.RNTECH_API.adminCreatePromo({ code:form.code, label:form.label, discountPercent:parseFloat(form.discountPercent)||null, active:true });
+      setShowForm(false); setForm({ code:'', label:'', discountPercent:'33.33' }); load();
+    } catch(err) { setError(err.message||'Could not create link'); }
+    finally { setSaving(false); }
+  };
+  const toggle = (p) => window.RNTECH_API.adminUpdatePromo(p.id, { active:!p.active }).then(load).catch(err=>alert(err.message));
+  const remove = (p) => { if (confirm('Delete this link? Any printed QR codes for it will stop giving the discount for good.')) window.RNTECH_API.adminDeletePromo(p.id).then(load); };
+  const copy = (p) => { navigator.clipboard && navigator.clipboard.writeText(p.url).then(()=>{ setCopied(p.id); setTimeout(()=>setCopied(null), 1500); }); };
+
+  return React.createElement('div', null,
+    React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8} },
+      React.createElement('span', { style:{...FS,color:'rgba(255,255,255,0.5)',fontSize:14} }, promos.length+' links'),
+      React.createElement(GlowButton, { small:true,onClick:()=>{ setError(''); setShowForm(true); } },'+ New QR Link')
+    ),
+    React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.35)',fontSize:12,lineHeight:1.6,margin:'0 0 20px'} },
+      'Each link opens tickets for the featured event, like /buy, with the discount on any paid ticket. Switch a link off and its QR code still works, just at full price.'),
+    React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16} },
+      promos.map(p=>React.createElement(FuturisticCard, { key:p.id, active:p.active },
+        React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,marginBottom:10} },
+          React.createElement('div', { style:{minWidth:0} },
+            React.createElement('div', { style:{...FS,fontWeight:800,fontSize:14,color:'#fff',textTransform:'uppercase',marginBottom:2} }, p.label || p.code),
+            React.createElement('div', { style:{...FS,color:'#10b981',fontSize:12,fontWeight:700} }, p.discountLabel)
+          ),
+          React.createElement('button', { onClick:()=>toggle(p), title:p.active?'Switch off':'Switch on', style:{...FS,flexShrink:0,cursor:'pointer',padding:'6px 12px',fontSize:11,fontWeight:800,letterSpacing:'0.08em',textTransform:'uppercase',border:`1px solid ${p.active?'rgba(16,185,129,0.5)':'rgba(255,255,255,0.2)'}`,background:p.active?'rgba(16,185,129,0.15)':'rgba(255,255,255,0.04)',color:p.active?'#10b981':'rgba(255,255,255,0.45)'} }, p.active?'● On':'○ Off')
+        ),
+        React.createElement('img', { src:'/api/promo/'+encodeURIComponent(p.code)+'/qr.svg', alt:'QR code', style:{width:140,height:140,background:'#fff',padding:6,display:'block',marginBottom:10,opacity:p.active?1:0.5} }),
+        React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.6)',fontSize:12,wordBreak:'break-all',marginBottom:10} }, p.url),
+        React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12,marginBottom:12} },
+          p.tickets+' ticket'+(p.tickets===1?'':'s')+' sold · £'+(p.revenuePence/100).toFixed(2)),
+        React.createElement('div', { style:{display:'flex',gap:8,flexWrap:'wrap'} },
+          React.createElement(GlowButton, { small:true,variant:'ghost',onClick:()=>copy(p) }, copied===p.id?'Copied!':'Copy Link'),
+          React.createElement('a', { href:'/api/promo/'+encodeURIComponent(p.code)+'/qr.svg', download:'rntech-qr-'+p.code+'.svg', style:{textDecoration:'none'} },
+            React.createElement(GlowButton, { small:true,variant:'ghost' }, 'Download QR')),
+          React.createElement(GlowButton, { small:true,variant:'danger',onClick:()=>remove(p) },'Delete')
+        )
+      ))
+    ),
+    showForm&&React.createElement(Modal, { title:'New QR Link', onClose:()=>setShowForm(false) },
+      React.createElement('form', { onSubmit:create },
+        React.createElement(AdminInput, { label:'Name (just for you)',value:form.label,onChange:e=>setForm(f=>({...f,label:e.target.value})),placeholder:'Flyers — October' }),
+        React.createElement(AdminInput, { label:'Link code (optional)',value:form.code,onChange:e=>setForm(f=>({...f,code:e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,'')})),placeholder:'flyers' }),
+        React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.35)',fontSize:11,margin:'-4px 0 12px'} }, 'Link will be rntech.live/qr/'+(form.code||'<random>')),
+        React.createElement(AdminInput, { label:'Discount %',type:'number',step:'0.01',min:1,max:99,value:form.discountPercent,onChange:e=>setForm(f=>({...f,discountPercent:e.target.value})) }),
+        error&&React.createElement('div', { style:{color:'#ef4444',fontSize:13,marginBottom:12,...FS} }, error),
+        React.createElement(GlowButton, { type:'submit',style:{width:'100%'},disabled:saving }, saving?'Creating…':'Create Link')
+      )
+    )
+  );
+}
+
 // ── Waitlist ──────────────────────────────────────────────────────────────────
 // Discount applies event-wide — the recipient picks whichever active paid ticket
 // type they want on the event page itself, rather than being locked to one tier
@@ -2515,6 +2583,7 @@ function PageAdmin({ user }) {
       case 'campaigns': return React.createElement(TabCampaigns);
       case 'inbox':     return React.createElement(TabInbox);
       case 'sponsors':  return React.createElement(TabSponsors);
+      case 'qrlinks':   return React.createElement(TabQrLinks);
       default:          return null;
     }
   };

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from ..database import get_db
 from ..models import Event, TicketType, EventInterest, Ticket, TicketOrder, User, PersonalOffer
 from .offers import offer_problem, discounted_price, discount_label, PROBLEM_TEXT
+from .promos import active_promo
 from ..auth import get_current_user, get_or_create_guest_user, ensure_guest_email_available, create_password_setup_link
 from ..email_service import send_email
 from ..ticket_pdf import generate_tickets_pdf
@@ -36,6 +37,7 @@ class CheckoutIn(BaseModel):
     holderEmail: str = ""
     inviteToken: str = ""
     offerToken: str = ""   # personal discount link — see _create_offer_checkout
+    promoCode: str = ""    # public QR discount link (/qr/{code}) — ignored if switched off
     quantity: int = 1
 
 
@@ -73,14 +75,22 @@ def create_checkout_session(data: CheckoutIn, request: Request, db: Session = De
             raise HTTPException(400, "This invite is for a different event")
         discount_percent = interest.invite_discount_percent or 0
 
+    # A switched-off (or unknown) code just means full price, so a QR scanned after the offer ends still
+    # sells a ticket. Doesn't stack with an invite discount.
+    promo = None if interest else active_promo(db, data.promoCode)
+
     if quantity < 1 or quantity > MAX_QUANTITY:
         raise HTTPException(400, f"Quantity must be between 1 and {MAX_QUANTITY}")
     if tt.sold_count + quantity > tt.capacity:
         remaining = max(tt.capacity - tt.sold_count, 0)
         raise HTTPException(400, f"Only {remaining} of this ticket type left")
 
-    discount_pence = (price * discount_percent) // 100
-    unit_total_pence = max(price - discount_pence, 0)
+    if promo:
+        unit_total_pence = discounted_price(price, promo.discount_bp)
+        discount_pence = price - unit_total_pence
+    else:
+        discount_pence = (price * discount_percent) // 100
+        unit_total_pence = max(price - discount_pence, 0)
     if unit_total_pence < MIN_CHARGE_PENCE:
         raise HTTPException(400, "That discount takes the ticket below the minimum payable amount")
     total_pence = unit_total_pence * quantity
@@ -113,6 +123,7 @@ def create_checkout_session(data: CheckoutIn, request: Request, db: Session = De
         total_pence=total_pence,
         status="pending",
         guest_account_created=guest_created,
+        promo_id=promo.id if promo else None,
         client_ip=ip_address,
         client_user_agent=user_agent,
     )
@@ -139,12 +150,13 @@ def create_checkout_session(data: CheckoutIn, request: Request, db: Session = De
             line_items=[{
                 "price_data": {
                     "currency": "gbp",
-                    "product_data": {"name": f"{event.title} — {tt.name}"},
+                    "product_data": {"name": f"{event.title} — {tt.name}",
+                                     **({"description": f"Offer: {discount_label(promo.discount_bp)}"} if promo else {})},
                     "unit_amount": unit_total_pence,
                 },
                 "quantity": quantity,
             }],
-            metadata={"order_id": order.id},
+            metadata={"order_id": order.id, **({"promo_id": promo.id} if promo else {})},
             success_url=f"{FRONTEND_URL}/?checkout=success&order={order.id}",
             cancel_url=f"{FRONTEND_URL}/?checkout=cancelled&order={order.id}",
         )

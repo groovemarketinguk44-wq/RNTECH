@@ -118,7 +118,7 @@ function PageHome({ user, onAuth, onNavigate, onPlayMix, currentMix }) {
 }
 
 /* ─── EVENTS ─────────────────────────────────────────────────────── */
-function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onConsumeEventIntent }) {
+function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onConsumeEventIntent, promoCode }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
@@ -142,9 +142,20 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
   const [interestError, setInterestError] = useState('');
   const [interestDone, setInterestDone] = useState(false);
 
+  // QR discount link — only applied while it's switched on in admin; otherwise prices stay normal
+  const [promo, setPromo] = useState(null);
+
   useEffect(() => {
     window.RNTECH_API.getEvents().then(ev => { setEvents(ev); setLoading(false); }).catch(()=>setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!promoCode) return;
+    window.RNTECH_API.getPromo(promoCode).then(p => setPromo(p && p.active ? p : null)).catch(() => {});
+  }, [promoCode]);
+
+  // Display only — the server recomputes the real price from the code at checkout
+  const promoPrice = (price) => promo && price > 0 ? price - Math.round(price * promo.discountBp / 10000) : price;
 
   const openTicketModal = (event) => {
     setSelectedType(null);
@@ -229,6 +240,7 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
         const { url } = await window.RNTECH_API.createCheckoutSession({
           ticketTypeId: selectedType.id,
           holderName, holderEmail, quantity,
+          promoCode: promo ? promo.code : '',
         });
         window.location.href = url; // off to Stripe Checkout
         return;
@@ -269,6 +281,7 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
       React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:10,marginBottom:8 } }, ticketEvent.title+' · '+ticketEvent.displayDate),
       ticketEvent.ticketBannerImage&&React.createElement('img', { src:ticketEvent.ticketBannerImage, alt:ticketEvent.title, style:{ width:'100%',height:85,objectFit:'cover',objectPosition:'center 75%',display:'block',marginBottom:8 } }),
       ticketEvent.ticketBio&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.6)',fontSize:10.5,lineHeight:1.4,marginBottom:10 } }, renderBio(ticketEvent.ticketBio)),
+      promo&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'#10b981',fontSize:12,fontWeight:700,marginBottom:8,letterSpacing:'0.04em',textTransform:'uppercase' } }, promo.discountLabel+' applied'),
       React.createElement('div', { style:{ display:'flex',flexDirection:'column',gap:5,marginBottom:10 } },
         (ticketEvent.ticketTypes||[]).filter(t=>t.active).map(t=>{
           const isSel = selectedType&&selectedType.id===t.id;
@@ -290,7 +303,8 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
                 )
               : React.createElement('div', { style:{ display:'flex',alignItems:'center',gap:8 } },
                   t.nearlyGone&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:9.5,letterSpacing:'0.05em',textTransform:'uppercase',color:'#f59e0b' } }, 'Nearly Gone'),
-                  React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:t.price===0?'#10b981':'#fff' } }, t.price===0?'FREE':'£'+(t.price/100).toFixed(2))
+                  promo&&t.price>0&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,fontSize:12,color:'rgba(255,255,255,0.35)',textDecoration:'line-through' } }, '£'+(t.price/100).toFixed(2)),
+                  React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:t.price===0||promo?'#10b981':'#fff' } }, t.price===0?'FREE':'£'+(promoPrice(t.price)/100).toFixed(2))
                 )
           );
         })
@@ -304,7 +318,7 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
       React.createElement(GlowButton, { onClick:doTicket,style:{ width:'100%',marginTop:0,padding:'10px 18px'},disabled:buying },
         buying?'Processing…':selectedType&&selectedType.price===0
           ?(quantity>1?`Confirm ${quantity} Free Tickets`:'Confirm Free Ticket')
-          :(quantity>1&&selectedType?`Pay £${(selectedType.price*quantity/100).toFixed(2)} — ${quantity} Tickets`:'Confirm Purchase'))
+          :(selectedType&&(quantity>1||promo)?`Pay £${(promoPrice(selectedType.price)*quantity/100).toFixed(2)}${quantity>1?` — ${quantity} Tickets`:''}`:'Confirm Purchase'))
     )
   );
 

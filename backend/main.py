@@ -11,7 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text, inspect as sa_inspect
 from .database import engine, SessionLocal
 from .models import Base
-from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout, offers
+from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout, offers, promos
 from .routes.campaigns import process_pending_sends, run_throttled_sends, scan_bounces
 from .routes.inbox_routes import sweep_side_folders_to_inbox
 
@@ -141,6 +141,7 @@ async def lifespan(app: FastAPI):
         _migrate("email_campaigns", "offer_max_tickets", "INTEGER DEFAULT 4")
         _migrate("email_campaigns", "offer_expires_at", "DATETIME")
         _migrate("ticket_orders", "offer_id", "TEXT")
+        _migrate("ticket_orders", "promo_id", "TEXT")
     # Ensure upload dirs exist
     for sub in ("images", "videos"):
         (UPLOAD_DIR / sub).mkdir(parents=True, exist_ok=True)
@@ -197,6 +198,7 @@ for router in [
     settings_routes.router,
     checkout.router,
     offers.router,
+    promos.router,
 ]:
     app.include_router(router, prefix="/api")
 
@@ -213,7 +215,8 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR / "static")), name="
 @app.get("/contact")
 @app.get("/admin")
 @app.get("/buy")
-def serve_app():
+@app.get("/qr/{code}")
+def serve_app(code: str = ""):
     # Always revalidate — this is a single-page app, so a stale cached copy in a
     # long-lived open tab silently keeps running old frontend code indefinitely.
     return FileResponse(

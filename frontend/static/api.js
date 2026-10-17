@@ -87,6 +87,13 @@ window.RNTECH_API = (function () {
     getOrderStatus: (orderId) => get('/checkout/order/' + orderId),
     getInvite: (token) => get('/invite/' + token),
     getOffer: (token) => get('/offer/' + token),
+    getPromo: (code) => get('/promo/' + encodeURIComponent(code)),
+
+    // Public QR discount links
+    adminGetPromos: () => get('/admin/promos'),
+    adminCreatePromo: (data) => post('/admin/promos', data),
+    adminUpdatePromo: (id, data) => patch('/admin/promos/' + id, data),
+    adminDeletePromo: (id) => del('/admin/promos/' + id),
 
     // Tickets
     issueTicket: (data) => post('/tickets', data),

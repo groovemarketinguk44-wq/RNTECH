@@ -241,11 +241,14 @@ const NAV_ITEMS = [
   { id: 'contact', label: 'Contact', icon: '✦' },
 ];
 
+// /qr/{code} — public discount link (QR codes). Behaves exactly like /buy, plus the discount while it's switched on.
+const QR_PATH = /^\/qr\/([^/]+)\/?$/;
+
 function App() {
   const [page, setPage] = useState(() => {
     const p = new URLSearchParams(window.location.search);
     if (p.get('checkout')) return 'tickets';
-    if (window.location.pathname === '/buy') return 'events';
+    if (window.location.pathname === '/buy' || QR_PATH.test(window.location.pathname)) return 'events';
     return 'home';
   });
   const [user, setUser] = useState(() => window.RNTECH_AUTH.getUser());
@@ -264,6 +267,10 @@ function App() {
     const p = new URLSearchParams(window.location.search);
     return p.get('offer') || null;
   });
+  const [promoCode] = useState(() => {
+    const m = window.location.pathname.match(QR_PATH);
+    return m ? decodeURIComponent(m[1]).toLowerCase() : null;
+  });
   const [checkoutInfo] = useState(() => {
     const p = new URLSearchParams(window.location.search);
     const status = p.get('checkout');
@@ -272,7 +279,8 @@ function App() {
   });
 
   const [pendingEventIntent, setPendingEventIntent] = useState(() => {
-    return window.location.pathname === '/buy' ? { eventId: 'featured', action: 'ticket' } : null;
+    const path = window.location.pathname;
+    return path === '/buy' || QR_PATH.test(path) ? { eventId: 'featured', action: 'ticket' } : null;
   }); // { eventId, action: 'ticket'|'detail' } — 'featured' resolves to the current featured event
 
   // Strip one-shot query params (invite/checkout/reset) and the /buy path from the URL after reading them
@@ -355,7 +363,7 @@ function App() {
     const props = { user, onAuth, onLogin: onAuthSuccess, onNavigate, onPlayMix: handlePlayMix, currentMix };
     switch (activePage) {
       case 'home':    return React.createElement(PageHome, props);
-      case 'events':  return React.createElement(PageEvents, { ...props, pendingEventIntent, onConsumeEventIntent: () => setPendingEventIntent(null) });
+      case 'events':  return React.createElement(PageEvents, { ...props, pendingEventIntent, promoCode, onConsumeEventIntent: () => setPendingEventIntent(null) });
       case 'mixes':   return React.createElement(PageMixes, props);
       case 'tickets': return React.createElement(PageTickets, { ...props, checkoutInfo });
       case 'contact': return React.createElement(PageContact, props);

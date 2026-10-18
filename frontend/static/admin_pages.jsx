@@ -2357,7 +2357,16 @@ function TabQrLinks() {
             React.createElement('div', { style:{...FS,fontWeight:800,fontSize:14,color:'#fff',textTransform:'uppercase',marginBottom:2} }, p.label || p.code),
             React.createElement('div', { style:{...FS,color:'#10b981',fontSize:12,fontWeight:700} }, p.discountLabel)
           ),
-          React.createElement('button', { onClick:()=>toggle(p), title:p.active?'Switch off':'Switch on', style:{...FS,flexShrink:0,cursor:'pointer',padding:'6px 12px',fontSize:11,fontWeight:800,letterSpacing:'0.08em',textTransform:'uppercase',border:`1px solid ${p.active?'rgba(16,185,129,0.5)':'rgba(255,255,255,0.2)'}`,background:p.active?'rgba(16,185,129,0.15)':'rgba(255,255,255,0.04)',color:p.active?'#10b981':'rgba(255,255,255,0.45)'} }, p.active?'● On':'○ Off')
+        ),
+        React.createElement('button', { type:'button', role:'switch', 'aria-checked':!!p.active, onClick:()=>toggle(p),
+            style:{...FS,width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,cursor:'pointer',padding:'12px 14px',marginBottom:14,textAlign:'left',
+              border:`1px solid ${p.active?'rgba(16,185,129,0.5)':'rgba(239,68,68,0.4)'}`,background:p.active?'rgba(16,185,129,0.1)':'rgba(239,68,68,0.08)'} },
+          React.createElement('span', null,
+            React.createElement('span', { style:{display:'block',fontWeight:800,fontSize:13,letterSpacing:'0.06em',textTransform:'uppercase',color:p.active?'#10b981':'#ef4444'} }, p.active?'Discount ON':'Discount OFF'),
+            React.createElement('span', { style:{display:'block',fontSize:11,color:'rgba(255,255,255,0.45)',marginTop:2} }, p.active?'Tap to switch off — QR goes to full price':'Tap to switch on — QR gives '+p.discountLabel)
+          ),
+          React.createElement('span', { style:{flexShrink:0,position:'relative',width:46,height:26,borderRadius:13,background:p.active?'#10b981':'rgba(255,255,255,0.2)',transition:'background .2s'} },
+            React.createElement('span', { style:{position:'absolute',top:3,left:p.active?23:3,width:20,height:20,borderRadius:'50%',background:'#fff',transition:'left .2s'} }))
         ),
         React.createElement('img', { src:'/api/promo/'+encodeURIComponent(p.code)+'/qr.svg', alt:'QR code', style:{width:140,height:140,background:'#fff',padding:6,display:'block',marginBottom:10,opacity:p.active?1:0.5} }),
         React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.6)',fontSize:12,wordBreak:'break-all',marginBottom:10} }, p.url),

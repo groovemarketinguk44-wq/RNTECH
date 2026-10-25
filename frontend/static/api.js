@@ -154,6 +154,7 @@ window.RNTECH_API = (function () {
     // Admin
     getStats: () => get('/admin/stats'),
     getPaymentsOverview: (days, eventId) => get('/admin/payments/overview?days=' + (days || 30) + (eventId ? '&event_id=' + encodeURIComponent(eventId) : '')),
+    getVisitors: (days) => get('/admin/visitors?days=' + (days || 7)),
     getMetaAdsOverview: (days, eventId) => get('/admin/meta-ads/overview?days=' + (days || 30) + (eventId ? '&event_id=' + encodeURIComponent(eventId) : '')),
     updateAdsRange: (eventId, since, until) => put('/admin/ads-range', { eventId, since: since || null, until: until || null }),
     updateDjSpend: (pence, eventId) => put('/admin/dj-spend', { pence, eventId: eventId || null }),

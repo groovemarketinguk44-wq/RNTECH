@@ -332,6 +332,7 @@
 
 <script src="/static/api.js"></script>
 <script src="/static/auth.js"></script>
+<script src="/static/rt.js"></script>
 
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
@@ -406,6 +407,10 @@ function App() {
   const [showVideoModal, setShowVideoModal] = useState(false);
   const videoRef = useRef(document.getElementById('bg-video'));
 
+  // Visitor stats (admin → Visitors): each section shown counts as a page view; a paid checkout landing back here is a sale
+  useEffect(() => { if (!showAdmin && window.rtTrack) window.rtTrack.page(page); }, [page, showAdmin]);
+  useEffect(() => { if (checkoutInfo && checkoutInfo.status === 'success' && window.rtTrack) window.rtTrack.event('ticket_bought'); }, []);
+
   // Restore session on load
   useEffect(() => {
     const token = window.RNTECH_AUTH.getToken();
@@ -431,6 +436,7 @@ function App() {
 
     setCurrentMix(mix);
     setShowVideoModal(false);
+    if (window.rtTrack) window.rtTrack.event('mix_play', mix.title);
 
     if (mix.videoSrc) {
       vid.src = mix.videoSrc;

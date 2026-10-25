@@ -11,7 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text, inspect as sa_inspect
 from .database import engine, SessionLocal
 from .models import Base
-from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout, offers, promos
+from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout, offers, promos, visitors
 from .routes.campaigns import process_pending_sends, run_throttled_sends, scan_bounces
 from .routes.inbox_routes import sweep_side_folders_to_inbox
 
@@ -78,6 +78,7 @@ def _run_mail_sweep():
 async def lifespan(app: FastAPI):
     # Create tables
     Base.metadata.create_all(bind=engine)
+    visitors.prune_old_events()
     # Migrate existing DBs: add columns added after initial deploy
     with engine.connect() as conn:
         inspector = sa_inspect(engine)
@@ -200,6 +201,7 @@ for router in [
     checkout.router,
     offers.router,
     promos.router,
+    visitors.router,
 ]:
     app.include_router(router, prefix="/api")
 

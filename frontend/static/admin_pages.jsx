@@ -3,6 +3,7 @@ var { useState, useEffect, useRef } = React;
 
 const ADMIN_TABS = [
   { id: 'overview',   label: 'Overview' },
+  { id: 'visitors',   label: 'Visitors' },
   { id: 'door',       label: 'Door' },
   { id: 'events',     label: 'Events' },
   { id: 'mixes',      label: 'Mixes' },
@@ -541,6 +542,116 @@ function TabOverview() {
     React.createElement(TabPayments),
     React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)',fontSize:13} },
       'Use the tabs above to manage events, mixes, tickets, attendees, and email campaigns.')
+  );
+}
+
+// ── Visitors (website stats) ──────────────────────────────────────────────────
+// Cookieless: who looked at which section, for how long, what they clicked and did, where they came from,
+// and how many went on to get a ticket. Data from /api/admin/visitors (backend/routes/visitors.py).
+function TabVisitors() {
+  const [days, setDays] = useState(7);
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const load = () => window.RNTECH_API.getVisitors(days).then(r => { if (alive) { setD(r); setErr(false); } }).catch(() => alive && setErr(true));
+    load();
+    const t = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [days]);
+
+  const card = { background:'rgba(4,12,28,0.82)', backdropFilter:'blur(10px)', border:'1px solid rgba(255,255,255,0.06)', padding:'18px 20px', marginBottom:16, minWidth:0, boxSizing:'border-box' };
+  const h = (t, sub) => React.createElement('div', { style:{marginBottom:12} },
+    React.createElement('div', { style:{...FS,color:'#fff',fontWeight:800,fontSize:13,letterSpacing:'0.08em',textTransform:'uppercase'} }, t),
+    sub && React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:12,marginTop:4} }, sub));
+  const num = n => (+n || 0).toLocaleString('en-GB');
+  const dur = s => { s = Math.round(+s || 0); return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's'; };
+  const period = days === 1 ? 'today' : 'last ' + days + ' days';
+  const ago = iso => { const m = (Date.now() - new Date(iso)) / 6e4; return m < 1 ? 'just now' : m < 60 ? Math.round(m) + ' min ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : new Date(iso).toLocaleDateString('en-GB', { day:'numeric', month:'short' }) + ' ' + new Date(iso).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }); };
+  const delta = (cur, prev, invert) => {
+    if (!prev) return null;
+    const pct = Math.round((cur - prev) / prev * 100);
+    if (!pct) return React.createElement('div', { style:{...FS,fontSize:11,color:'rgba(255,255,255,0.35)',marginTop:4} }, 'same as before');
+    const good = invert ? pct < 0 : pct > 0;
+    return React.createElement('div', { style:{...FS,fontSize:11,marginTop:4,color:good ? '#10b981' : '#f87171'} }, (pct > 0 ? '▲ ' : '▼ ') + Math.abs(pct) + '% vs previous');
+  };
+  const stat = (label, value, color, dl) => React.createElement('div', null, React.createElement(StatCard, { label, value, color }), dl);
+  const bars = (rows, val, label, right, color) => { const max = Math.max(1, ...rows.map(val));
+    return React.createElement('div', { style:{display:'flex',flexDirection:'column',gap:10} }, rows.map((r, i) => React.createElement('div', { key:i },
+      React.createElement('div', { style:{display:'flex',justifyContent:'space-between',gap:12,...FS,fontSize:13,color:'#fff',marginBottom:5} },
+        React.createElement('span', { style:{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} }, label(r)),
+        React.createElement('span', { style:{color:'rgba(255,255,255,0.6)',whiteSpace:'nowrap'} }, right(r))),
+      React.createElement('div', { style:{height:6,background:'rgba(255,255,255,0.06)'} },
+        React.createElement('div', { style:{height:'100%',width:(val(r) / max * 100) + '%',background:typeof color === 'function' ? color(r, i) : color} }))))); };
+  const table = (head, rows) => React.createElement('div', { style:{overflowX:'auto'} }, React.createElement('table', { style:{width:'100%',borderCollapse:'collapse',...FS,fontSize:13} },
+    React.createElement('thead', null, React.createElement('tr', null, head.map((c, i) => React.createElement('th', { key:i, style:{textAlign:i ? 'right' : 'left',color:'rgba(255,255,255,0.4)',fontSize:10,letterSpacing:'0.1em',textTransform:'uppercase',fontWeight:700,padding:'0 8px 8px',borderBottom:'1px solid rgba(255,255,255,0.08)',whiteSpace:'nowrap'} }, c)))),
+    React.createElement('tbody', null, rows.map((r, i) => React.createElement('tr', { key:i }, r.map((c, j) => React.createElement('td', { key:j, style:{textAlign:j ? 'right' : 'left',color:j ? 'rgba(255,255,255,0.75)' : '#fff',padding:'10px 8px',borderBottom:'1px solid rgba(255,255,255,0.05)'} }, c)))))));
+
+  const toggle = React.createElement('div', { style:{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'} },
+    d && d.live.length > 0 && React.createElement('span', { title:d.live.join(', '), style:{...FS,fontSize:12,color:'#10b981',marginRight:8,display:'inline-flex',alignItems:'center',gap:6} },
+      React.createElement('span', { style:{width:8,height:8,borderRadius:'50%',background:'#10b981',boxShadow:'0 0 10px #10b981'} }), d.live.length + ' on the site now'),
+    [[1, 'Today'], [7, '7D'], [30, '30D'], [90, '90D']].map(([n, l]) => React.createElement('button', { key:n, onClick:() => setDays(n), style:{...FS,padding:'5px 12px',border:`1px solid ${days === n ? '#3272a8' : 'rgba(255,255,255,0.15)'}`,background:days === n ? 'rgba(50,114,168,0.2)' : 'transparent',color:days === n ? '#fff' : 'rgba(255,255,255,0.5)',fontSize:11,fontWeight:700,cursor:'pointer'} }, l)));
+
+  const header = React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:16} },
+    React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.5)',fontSize:13} }, 'Who visits rntech.live, what they look at and do — ' + period + '.'), toggle);
+
+  if (err && !d) return React.createElement('div', null, header, React.createElement('div', { style:{...card,...FS,color:'#f87171'} }, 'Couldn\'t load visitor stats — try again in a moment.'));
+  if (!d) return React.createElement('div', null, header, React.createElement(Spinner));
+  const k = d.kpis, p = d.prev;
+  if (!k.sessions && !p.sessions) return React.createElement('div', null, header, React.createElement('div', { style:{...card,...FS,color:'rgba(255,255,255,0.6)',textAlign:'center',padding:40,lineHeight:1.7} },
+    'No visits recorded yet — stats start from today. As people browse the site you\'ll see where they come from, which sections they look at, what they play and how many buy tickets.'));
+
+  const f = d.funnel, f0 = f[0].n || 1, funnelCols = ['#3272a8', '#06b6d4', '#f59e0b', '#10b981'];
+  const devTotal = d.devices.reduce((s, r) => s + r.sessions, 0) || 1, devCol = { Phone:'#06b6d4', Desktop:'#3272a8', Tablet:'#9f84b2' };
+  const trend = d.trend.map(t => ({ date:t.date, value:t.visitors, views:t.views, label:days === 1 ? t.date.slice(0, 2) : String(new Date(t.date + 'T00:00:00').getDate()),
+    tooltipTitle:days === 1 ? t.date : new Date(t.date + 'T00:00:00').toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' }) }));
+
+  return React.createElement('div', null,
+    header,
+    React.createElement('div', { className:'adm-counts', style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16,marginBottom:16} },
+      stat('Visitors', num(k.visitors), '#06b6d4', delta(k.visitors, p.visitors)),
+      stat('Page views', num(k.pageviews), '#3272a8', delta(k.pageviews, p.pageviews)),
+      stat('Avg visit', dur(k.avgTime), '#9f84b2', delta(k.avgTime, p.avgTime)),
+      stat('Left straight away', k.bounce + '%', '#f59e0b', delta(k.bounce, p.bounce, true)),
+      stat('Got a ticket', num(k.buyers), '#10b981', React.createElement('div', { style:{...FS,fontSize:11,color:'rgba(255,255,255,0.4)',marginTop:4} }, (k.sessions ? (k.buyers / k.sessions * 100).toFixed(1) : 0) + '% of visits'))),
+    React.createElement('div', { style:card }, h('Visitors', 'Hover a bar for visitors and page views.'),
+      React.createElement(BarChart, { series:trend, color:'#06b6d4', valueFormatter:v => Math.round(v).toLocaleString('en-GB'),
+        tooltipLines:t => [{ value:t.value, label:t.value === 1 ? 'visitor' : 'visitors' }, { value:t.views, label:'page views' }] })),
+    React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:16} },
+      React.createElement('div', { style:card }, h('From visit to ticket', 'How far people get.'),
+        bars(f, r => r.n, r => r.step, r => num(r.n) + (r === f[0] ? '' : ' · ' + Math.round(r.n / f0 * 100) + '%'), (r, i) => funnelCols[i])),
+      React.createElement('div', { style:card }, h('Where they came from', 'Visits · ticket buyers'),
+        d.sources.length ? bars(d.sources, r => r.sessions, r => r.name, r => num(r.sessions) + (r.buyers ? ' · ' + r.buyers + ' bought' : ''), '#3272a8') : null,
+        d.campaigns.length > 0 && React.createElement('div', { style:{marginTop:16} }, React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.4)',fontSize:10,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:8} }, 'Campaigns (utm_campaign)'),
+          bars(d.campaigns, r => r.sessions, r => r.name, r => num(r.sessions) + (r.buyers ? ' · ' + r.buyers + ' bought' : ''), '#9f84b2')))),
+    React.createElement('div', { style:card }, h('Sections', 'Time is how long it was on screen; read is how far down people scrolled.'),
+      table(['Section', 'Views', 'Visitors', 'Avg time', 'Read', 'Landed here'], d.pages.map(r => [r.name, num(r.views), num(r.visitors), dur(r.avgTime), r.scroll + '%', num(r.entries)]))),
+    React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:16} },
+      React.createElement('div', { style:card }, h('What they did', 'Mixes played, events opened, checkouts, sign-ups.'),
+        d.actions.length ? d.actions.map((a, i) => React.createElement('div', { key:i, style:{marginBottom:12} },
+          React.createElement('div', { style:{display:'flex',justifyContent:'space-between',...FS,fontSize:13,color:'#fff'} }, React.createElement('b', null, a.name), React.createElement('span', null, num(a.count))),
+          a.top.length > 0 && React.createElement('div', { style:{...FS,fontSize:12,color:'rgba(255,255,255,0.45)',marginTop:3,lineHeight:1.5} }, a.top.map(t => t.name + ' (' + t.count + ')').join(' · '))))
+          : React.createElement('div', { style:{...FS,fontSize:13,color:'rgba(255,255,255,0.4)'} }, 'Nothing yet.')),
+      React.createElement('div', { style:card }, h('What they clicked', 'Buttons and links.'),
+        d.clicks.length ? table(['Clicked', 'Times'], d.clicks.slice(0, 15).map(c => [c.label + (c.type === 'outbound' ? ' ↗' : ''), num(c.count)]))
+          : React.createElement('div', { style:{...FS,fontSize:13,color:'rgba(255,255,255,0.4)'} }, 'No clicks yet.'))),
+    React.createElement('div', { style:card }, h('Devices', 'What they browsed on — in-app browsers show when people tap through from Instagram, Facebook or TikTok.'),
+      React.createElement('div', { style:{display:'flex',height:12,marginBottom:14} }, d.devices.map((r, i) => React.createElement('div', { key:i, title:r.name, style:{width:(r.sessions / devTotal * 100) + '%',background:devCol[r.name] || '#64748b'} }))),
+      React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:20} },
+        bars(d.devices, r => r.sessions, r => r.name, r => Math.round(r.sessions / devTotal * 100) + '% · ' + num(r.sessions), r => devCol[r.name] || '#64748b'),
+        bars(d.browsers, r => r.sessions, r => r.name, r => num(r.sessions), '#3272a8'))),
+    React.createElement('div', { style:card }, h('Recent visits', 'Each visit\'s journey through the site, newest first.'),
+      d.recent.map((v, i) => React.createElement('div', { key:i, style:{padding:'12px 0',borderTop:i ? '1px solid rgba(255,255,255,0.06)' : 'none'} },
+        React.createElement('div', { style:{display:'flex',flexWrap:'wrap',gap:'4px 12px',alignItems:'center',...FS,fontSize:12,color:'rgba(255,255,255,0.55)'} },
+          React.createElement('b', { style:{color:'#fff'} }, ago(v.start)),
+          React.createElement('span', { style:{padding:'2px 8px',border:'1px solid rgba(50,114,168,0.5)',color:'#9cc4e8'} }, v.source + (v.campaign ? ' · ' + v.campaign : '')),
+          React.createElement('span', null, v.device + ' · ' + v.browser), React.createElement('span', null, dur(v.time)),
+          v.bought && React.createElement('span', { style:{padding:'2px 8px',background:'rgba(16,185,129,0.15)',color:'#10b981',fontWeight:700} }, 'Got a ticket')),
+        React.createElement('div', { style:{...FS,fontSize:13,color:'#fff',marginTop:6,lineHeight:1.7} },
+          v.pages.map((pg, j) => (j ? ' → ' : '') + pg.name + (pg.time ? ' (' + dur(pg.time) + ')' : '')).join('')),
+        v.actions.length > 0 && React.createElement('div', { style:{...FS,fontSize:12,color:'rgba(255,255,255,0.45)',marginTop:3} }, v.actions.join(' · '))))),
+    React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.3)',fontSize:12,lineHeight:1.6} },
+      'No cookies and nothing saved on visitors\' devices. A visitor is counted once a day; IP addresses are never stored. Admin visits aren\'t counted. Tag links you share with ?utm_source=instagram&utm_campaign=halloween to see them as their own source and campaign.')
   );
 }
 
@@ -2819,6 +2930,7 @@ function PageAdmin({ user }) {
   const renderTab = () => {
     switch(tab) {
       case 'overview':  return React.createElement(TabOverview);
+      case 'visitors':  return React.createElement(TabVisitors);
       case 'door':      return React.createElement(TabDoor);
       case 'events':    return React.createElement(TabEvents);
       case 'mixes':     return React.createElement(TabMixes);

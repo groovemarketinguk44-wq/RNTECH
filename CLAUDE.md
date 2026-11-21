@@ -19,7 +19,7 @@ uvicorn backend.main:app --reload --port 8000
 
 ## Deploy
 
-Fly app `rntech` (lhr): `fly deploy`.
+Fly app `rntech`. Deploys automatically: GitHub Action `.github/workflows/fly-deploy.yml` runs `flyctl deploy` whenever main changes (merging a PR = deploying; it can also be run by hand from the Actions tab). Uses the FLY_API_TOKEN repo secret (deploy-only token). Work on a branch; only merge to main when it should go live.
 
 ## Environment variables (names only; values live in Fly secrets / local .env, never in git)
 

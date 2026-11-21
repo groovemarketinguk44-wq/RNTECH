@@ -43,6 +43,7 @@ class Event(Base):
     location = Column(String)
     description = Column(Text, default="")
     poster_image = Column(String, nullable=True)   # path relative to /uploads/
+    hero_video = Column(String, nullable=True)  # looping video for the home hero card, path relative to /uploads/
     ticket_banner_image = Column(String, nullable=True)  # banner shown on the ticket-buying modal, path relative to /uploads/
     ticket_bio = Column(Text, nullable=True)             # short marketing blurb shown on the ticket-buying modal, supports **bold**
     lineup_json = Column(Text, default="[]")        # [{name, role}]
@@ -55,6 +56,7 @@ class Event(Base):
     ticket_types = relationship("TicketType", back_populates="event", cascade="all, delete-orphan")
     interests = relationship("EventInterest", back_populates="event", cascade="all, delete-orphan")
     registration_mode = Column(String, default="open")  # open | interest | closed
+    door_token = Column(String, nullable=True, index=True)  # secret door-staff link, see routes/door.py
 
     @property
     def lineup(self):

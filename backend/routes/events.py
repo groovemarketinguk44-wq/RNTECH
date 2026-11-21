@@ -43,6 +43,7 @@ def _event_dict(e: Event) -> dict:
         "description": e.description,
         "posterImage": f"/uploads/{e.poster_image}" if e.poster_image else None,
         "ticketBannerImage": f"/uploads/{e.ticket_banner_image}" if e.ticket_banner_image else None,
+        "heroVideo": f"/uploads/{e.hero_video}" if e.hero_video else None,
         "ticketBio": e.ticket_bio or "",
         "lineup": e.lineup, "giveaways": e.giveaways,
         "status": e.status, "isFree": e.is_free, "featured": e.featured,
@@ -215,6 +216,39 @@ def remove_ticket_banner(event_id: str, db: Session = Depends(get_db), _=Depends
         if banner_path.exists():
             banner_path.unlink(missing_ok=True)
         e.ticket_banner_image = None
+        db.commit()
+
+
+@router.post("/admin/events/{event_id}/hero-video")
+async def upload_hero_video(event_id: str, file: UploadFile = File(...),
+                            db: Session = Depends(get_db), _=Depends(require_admin)):
+    e = db.query(Event).filter(Event.id == event_id).first()
+    if not e:
+        raise HTTPException(404, "Event not found")
+    ext = Path(file.filename).suffix.lower() if file.filename else ".mp4"
+    if ext not in (".mp4", ".webm", ".mov"):
+        raise HTTPException(400, "Upload an .mp4, .webm or .mov video")
+    # Versioned filename so phones never keep showing a cached older video.
+    filename = f"hero-{event_id}-{secrets.token_hex(3)}{ext}"
+    dest = UPLOAD_DIR / "videos"
+    dest.mkdir(parents=True, exist_ok=True)
+    with open(dest / filename, "wb") as f:
+        f.write(await file.read())
+    if e.hero_video:
+        (UPLOAD_DIR / e.hero_video).unlink(missing_ok=True)
+    e.hero_video = f"videos/{filename}"
+    db.commit()
+    return {"heroVideo": f"/uploads/videos/{filename}"}
+
+
+@router.delete("/admin/events/{event_id}/hero-video", status_code=204)
+def remove_hero_video(event_id: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+    e = db.query(Event).filter(Event.id == event_id).first()
+    if not e:
+        raise HTTPException(404, "Event not found")
+    if e.hero_video:
+        (UPLOAD_DIR / e.hero_video).unlink(missing_ok=True)
+        e.hero_video = None
         db.commit()
 
 

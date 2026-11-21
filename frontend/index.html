@@ -7,24 +7,33 @@
   <title>RNTECH - To The Stars</title>
   <link rel="icon" type="image/png" href="/static/favicon.png" />
   <link rel="apple-touch-icon" href="/static/favicon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="RNTECH" />
   <meta property="og:title" content="RNTECH - To The Stars" />
   <meta property="og:description" content="RnB meets Tech House. St Albans." />
   <meta name="description" content="RnB meets Tech House. St Albans." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Orbitron:wght@200;300;400;700&display=swap" rel="stylesheet" />
   <link href="https://fonts.cdnfonts.com/css/ethnocentric" rel="stylesheet" />
-  <!-- Meta Pixel — PageView only; InitiateCheckout/Purchase/CompleteRegistration are sent server-side via Conversions API to avoid double-counting -->
+  <!-- Meta Pixel — PageView only; InitiateCheckout/Purchase/CompleteRegistration are sent server-side via Conversions API to avoid double-counting.
+       Only loaded once the visitor accepts cookies (cookie banner in legal.jsx); the choice is kept in localStorage 'rt_cookie_consent'. -->
   <script>
-    !function(f,b,e,v,n,t,s)
-    {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
-    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
-    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
-    n.queue=[];t=b.createElement(e);t.async=!0;
-    t.src=v;s=b.getElementsByTagName(e)[0];
-    s.parentNode.insertBefore(t,s)}(window, document,'script',
-    'https://connect.facebook.net/en_US/fbevents.js');
-    fbq('init', '1068567272281457');
-    fbq('track', 'PageView');
+    window.rtLoadPixel = function () {
+      if (window.fbq) return;
+      !function(f,b,e,v,n,t,s)
+      {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+      n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+      if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+      n.queue=[];t=b.createElement(e);t.async=!0;
+      t.src=v;s=b.getElementsByTagName(e)[0];
+      s.parentNode.insertBefore(t,s)}(window, document,'script',
+      'https://connect.facebook.net/en_US/fbevents.js');
+      fbq('init', '1068567272281457');
+      fbq('track', 'PageView');
+    };
+    try { if (localStorage.getItem('rt_cookie_consent') === 'accept') window.rtLoadPixel(); } catch (e) {}
   </script>
   <!-- OneSignal — admin-only ticket sale push notifications. No auto-prompt; permission is
        requested explicitly from the admin panel so regular site visitors are never asked. -->
@@ -38,6 +47,7 @@
     });
   </script>
   <link rel="manifest" href="/static/manifest.json" />
+  <link rel="preload" href="/static/uploads/logo-transparent.png" as="image" fetchpriority="high" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -296,8 +306,35 @@
     @media (max-width: 680px) {
       nav .nav-links { display: none; }
       nav .nav-right { display: none; }
+      /* Only the logo shows on phones, so centre it */
+      nav { grid-template-columns: 1fr; justify-items: center; transition: transform 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.35s ease; }
+      nav .nav-logo { justify-self: center; }
+      nav.nav-hide-top { transform: translateY(-100%); opacity: 0; pointer-events: none; visibility: hidden; transition: transform 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.35s ease, visibility 0s linear 0.45s; }
+      /* ── Phone performance: iOS has to re-blur every video/animation frame behind a backdrop-filter,
+         and every background-position / box-shadow animation repaints. The bars are ~95% opaque anyway. */
+      nav { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: rgba(5,3,16,0.96) !important; }
+      .mobile-nav { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: rgba(5,3,16,0.97) !important; }
+      .hec::before { animation: none !important; }
+      .hec-btn-main { animation: none !important; background-position: 0% 50% !important; }
+      .hec-live i { animation: none !important; box-shadow: 0 0 6px rgba(52,211,153,0.9) !important; }
+      .hec { box-shadow: 0 24px 60px -24px rgba(0,0,0,0.9), 0 0 50px -16px rgba(50,114,168,0.5) !important; }
+      /* Home hero on phones: tight to the top so the event card shows on first load */
+      /* One even gap (--hg) above the logo, logo→title, title→card. The logo PNG has transparent
+         padding (7.4% of its width on top, 11.7% below), cancelled with negative margins. */
+      .home-hero { --hg: 26px; --lw: min(220px, 54vw); min-height: 0 !important; justify-content: flex-start !important; padding: var(--hg) 16px 40px !important; }
+      .home-hero-title { margin-bottom: var(--hg) !important; }
+      .home-hero-title p { margin-bottom: 6px !important; }
+      /* THE lag on phones (measured in WebKit: 3fps → 60fps): the shimmer animates the text's background
+         inside a wrapper with three stacked drop-shadow filters, so the whole glow re-rasterises every frame.
+         Keep the glow, freeze the shimmer on its brightest frame. */
+      .home-hero-stars { animation: none !important; background-position: 40% center !important; }
+      /* Static glow on phones: animating stacked drop-shadow filters every frame is what made first load janky */
+      .home-hero-logo { width: var(--lw) !important; margin-top: calc(var(--lw) * -0.074) !important; margin-bottom: calc(var(--hg) - var(--lw) * 0.117) !important; animation: none !important; filter: drop-shadow(0 0 24px rgba(50,114,168,0.8)) drop-shadow(0 0 48px rgba(6,182,212,0.4)) !important; }
       .mobile-nav { display: block; }
       body { padding-bottom: 70px; }
+      /* keep the legal footer clear of the fixed bottom nav */
+      .site-footer { padding-bottom: calc(96px + env(safe-area-inset-bottom)) !important; }
+      .cookie-banner { bottom: calc(84px + env(safe-area-inset-bottom)) !important; }
     }
 
     input:-webkit-autofill,
@@ -322,6 +359,214 @@
       opacity: 0;
       pointer-events: none;
     }
+
+    /* ── Event "ticket" card (HeroEventCard in pages.jsx): home hero, events grid, event page ── */
+    .hec {
+      --hec-blue: #3272a8; --hec-lilac: #9f84b2; --hec-ice: #b8d8ff;
+      --hec-bg: #060f1d; --hec-r: 22px;
+      position: relative; width: 100%; max-width: 540px; margin: 0 auto 40px;
+      text-align: left; border-radius: var(--hec-r); background: var(--hec-bg);
+      isolation: isolate; container: hec / inline-size;
+      box-shadow: 0 30px 80px -20px rgba(0,0,0,0.85), 0 0 60px -10px rgba(50,114,168,0.45), 0 0 120px -30px rgba(159,132,178,0.4);
+      animation: hecIn 0.4s ease both;
+    }
+    .hec--grid { max-width: none; margin: 0; box-shadow: 0 24px 60px -24px rgba(0,0,0,0.9), 0 0 50px -20px rgba(50,114,168,0.45); animation-delay: 0s; }
+    .hec--detail { max-width: none; margin: 0 0 36px; }
+    .hec--past { filter: saturate(0.55); }
+    .hec::before {
+      content: ''; position: absolute; inset: -1px; z-index: -1; border-radius: calc(var(--hec-r) + 1px);
+      padding: 1px; pointer-events: none;
+      background: linear-gradient(120deg, rgba(184,216,255,0.75), rgba(50,114,168,0.25) 30%, rgba(159,132,178,0.7) 60%, rgba(184,216,255,0.2) 85%, rgba(159,132,178,0.6));
+      background-size: 300% 300%; animation: btnGlow 8s ease infinite;
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+    }
+    .hec-media { position: relative; aspect-ratio: 16 / 11; overflow: hidden; transform: translateZ(0); border-radius: var(--hec-r) var(--hec-r) 0 0; background: #0a1628; margin-bottom: -1px; }
+    .hec--grid .hec-media { aspect-ratio: 4 / 3; }
+    .hec--detail .hec-media { aspect-ratio: 16 / 9; }
+    /* Still image: slow CSS zoom, scale only (no translate = no pixel-snapping judder) */
+    .hec-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 40%; transform-origin: 50% 45%; transform: translate3d(0,0,0) scale(1.02); will-change: transform; backface-visibility: hidden; -webkit-backface-visibility: hidden; animation: hecDrift 24s cubic-bezier(0.45,0,0.55,1) infinite alternate; }
+    /* Video: zoom is baked into the file, so no transform at all. Invisible until it is really playing. */
+    .hec-vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 40%; opacity: 0; transition: opacity 0.6s ease; pointer-events: none; background: transparent; }
+    .hec-vid.is-playing { opacity: 1; }
+    .hec-img.is-covered { display: none; } /* stop the still's zoom once the video is showing */
+    .hec-vid::-webkit-media-controls, .hec-vid::-webkit-media-controls-start-playback-button, .hec-vid::-webkit-media-controls-panel { display: none !important; -webkit-appearance: none; opacity: 0 !important; }
+    .hec-shade { position: absolute; inset: 0; pointer-events: none; background:
+      linear-gradient(180deg, rgba(6,15,29,0.55) 0%, rgba(6,15,29,0) 26%, rgba(6,15,29,0) 42%, rgba(6,15,29,0.78) 74%, var(--hec-bg) 100%); }
+    .hec-date {
+      position: absolute; top: 14px; left: 14px; width: 60px; padding: 7px 0 8px; text-align: center;
+      display: flex; flex-direction: column; align-items: center; border-radius: 14px;
+      background: rgba(6,15,29,0.72); border: 1px solid rgba(184,216,255,0.28);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+    .hec-date-m { font-size: 10px; font-weight: 700; letter-spacing: 0.22em; color: var(--hec-ice); padding-left: 0.22em; }
+    .hec-date-d { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 28px; line-height: 1; letter-spacing: -0.04em; margin: 2px 0 1px; color: #fff; }
+    .hec-date-w { font-size: 9.5px; font-weight: 600; letter-spacing: 0.2em; color: rgba(255,255,255,0.55); padding-left: 0.2em; }
+    .hec-live {
+      position: absolute; top: 16px; right: 14px; display: inline-flex; align-items: center; gap: 7px;
+      padding: 6px 11px 6px 10px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #fff;
+      background: rgba(6,15,29,0.72); border: 1px solid rgba(255,255,255,0.18);
+    }
+    .hec-live i { width: 7px; height: 7px; border-radius: 50%; background: #34d399; animation: hecPulse 2s ease-out infinite; }
+    .hec-live.is-past i { background: rgba(255,255,255,0.4); animation: none; }
+    .hec-head { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 22px 16px; }
+    .hec-place { font-size: 11px; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; color: var(--hec-ice); margin-bottom: 8px; opacity: 0.9; }
+    .hec-title {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; text-transform: uppercase;
+      font-size: clamp(24px, 8cqi, 46px); line-height: 0.98; letter-spacing: -0.035em; color: #fff; margin: 0; text-wrap: balance;
+      text-shadow: 0 2px 18px rgba(0,0,0,0.5);
+    }
+    .hec-perf { position: relative; height: 22px; background: var(--hec-bg); }
+    .hec-perf::before { content: ''; position: absolute; left: 22px; right: 22px; top: 50%; border-top: 2px dashed rgba(184,216,255,0.18); }
+    .hec-stub { padding: 6px 22px 22px; border-radius: 0 0 var(--hec-r) var(--hec-r); background: linear-gradient(180deg, var(--hec-bg), #081428); }
+    .hec-stats { display: grid; margin: 0 0 18px; }
+    .hec-stat { padding: 4px 12px; border-left: 1px solid rgba(255,255,255,0.09); min-width: 0; }
+    .hec-stat:first-child { padding-left: 0; border-left: 0; }
+    .hec-stat dt { font-size: 9.5px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.42); margin-bottom: 5px; white-space: nowrap; }
+    .hec-stat dd { margin: 0; font-size: 16px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hec-actions { display: grid; grid-template-columns: 1.6fr 1fr; gap: 10px; }
+    .hec-actions.is-single { grid-template-columns: 1fr; }
+    .hec-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 52px; padding: 0 18px;
+      white-space: nowrap; border-radius: 14px; cursor: pointer; font-family: 'Space Grotesk', sans-serif; font-size: 13.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #fff;
+      transition: transform 0.25s cubic-bezier(0.16,1,0.3,1), box-shadow 0.25s, background 0.25s, border-color 0.25s, opacity 0.25s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .hec-btn-main {
+      border: 0; background: linear-gradient(135deg, #3272a8, #9f84b2, #3272a8); background-size: 200% 200%; animation: btnGlow 3s ease infinite;
+      box-shadow: 0 10px 30px -8px rgba(50,114,168,0.8), 0 0 40px -10px rgba(159,132,178,0.6), inset 0 1px 0 rgba(255,255,255,0.25);
+    }
+    .hec-btn-main > span[aria-hidden] { font-size: 17px; transition: transform 0.25s cubic-bezier(0.16,1,0.3,1); }
+    .hec-btn-main:disabled { opacity: 0.45; cursor: not-allowed; animation: none; }
+    .hec-btn-ghost { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.16); }
+    @media (hover: hover) {
+      .hec-btn:not(:disabled):hover { transform: translateY(-2px); }
+      .hec-btn-main:not(:disabled):hover { box-shadow: 0 14px 36px -8px rgba(50,114,168,0.95), 0 0 56px -8px rgba(159,132,178,0.7), inset 0 1px 0 rgba(255,255,255,0.3); }
+      .hec-btn-main:not(:disabled):hover > span[aria-hidden] { transform: translateX(4px); }
+      .hec-btn-ghost:hover { background: rgba(255,255,255,0.09); border-color: rgba(255,255,255,0.35); }
+    }
+    .hec-btn:not(:disabled):active { transform: scale(0.98); }
+    .hec-btn:focus-visible { outline: 2px solid var(--hec-ice); outline-offset: 3px; }
+    /* Narrow cards (phones, and grid columns) */
+    @container hec (max-width: 440px) {
+      .hec-head { padding: 0 18px 14px; }
+      .hec-place { font-size: 10px; letter-spacing: 0.18em; }
+      .hec-perf::before { left: 18px; right: 18px; }
+      .hec-stub { padding: 4px 18px 18px; }
+      .hec-stat { padding: 2px 10px; }
+      .hec-stat dt { font-size: 8.5px; letter-spacing: 0.13em; }
+      .hec-stat dd { font-size: 14.5px; }
+      .hec-date { width: 54px; top: 12px; left: 12px; }
+      .hec-date-d { font-size: 24px; }
+      .hec-live { top: 14px; right: 12px; font-size: 9.5px; }
+      .hec-btn { padding: 0 12px; letter-spacing: 0.08em; font-size: 12.5px; }
+    }
+    @media (max-width: 480px) {
+      .hec { --hec-r: 18px; }
+      .hec--hero { margin-bottom: 28px; }
+      .hec--hero .hec-media { aspect-ratio: 1 / 1; }
+      .hec--detail .hec-media { aspect-ratio: 4 / 3.4; }
+      .hec-actions { grid-template-columns: 1fr; }
+    }
+    /* Event page body copy under the card */
+    .evd-copy { margin: 0 0 40px; max-width: 64ch; }
+    .evd-copy p { font-size: 16.5px; line-height: 1.75; color: rgba(255,255,255,0.74); margin: 0 0 1.1em; }
+    .evd-copy p:first-child { font-size: 19px; color: #fff; font-weight: 500; line-height: 1.55; }
+    .evd-cta { width: 100%; max-width: 420px; }
+
+    /* ── Ticket checkout sheet (ticketModal in pages.jsx) ── */
+    body:has(.tkm-overlay) { overflow: hidden; }
+    body:has(.tkm-overlay) nav, body:has(.tkm-overlay) .mobile-nav { display: none !important; }
+    .tkm-overlay {
+      position: fixed; inset: 0; z-index: 500; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+      display: flex; padding: max(20px, env(safe-area-inset-top)) 14px max(20px, env(safe-area-inset-bottom));
+      background: radial-gradient(120% 80% at 50% 0%, rgba(50,114,168,0.18), transparent 60%), rgba(1,4,10,0.82);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      animation: fadeIn 0.25s ease both;
+    }
+    .tkm {
+      --hec-bg: #060f1d; --hec-ice: #b8d8ff;
+      position: relative; margin: auto; width: 100%; max-width: 460px; border-radius: 22px; background: var(--hec-bg);
+      box-shadow: 0 40px 100px -20px rgba(0,0,0,0.9), 0 0 0 1px rgba(184,216,255,0.16), 0 0 80px -20px rgba(50,114,168,0.55);
+      animation: tkmIn 0.45s cubic-bezier(0.16,1,0.3,1) both;
+    }
+    .tkm-media { position: relative; aspect-ratio: 16 / 8.5; overflow: hidden; border-radius: 22px 22px 0 0; background: #0a1628; transform: translateZ(0); }
+    .tkm-close {
+      position: absolute; top: 12px; right: 12px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+      font-size: 24px; line-height: 1; color: #fff; cursor: pointer; padding: 0 0 2px;
+      background: rgba(6,15,29,0.55); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      transition: background 0.2s, transform 0.2s;
+    }
+    .tkm-close:hover { background: rgba(255,255,255,0.14); transform: rotate(90deg); }
+    .tkm-head { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 20px 14px; }
+    .tkm-eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: 0.24em; text-transform: uppercase; color: var(--hec-ice); margin-bottom: 6px; }
+    .tkm-title { font-size: clamp(22px, 6.4vw, 30px); font-weight: 700; text-transform: uppercase; letter-spacing: -0.03em; line-height: 1; color: #fff; margin: 0 0 7px; text-shadow: 0 2px 16px rgba(0,0,0,0.5); }
+    .tkm-meta { font-size: 12.5px; color: rgba(255,255,255,0.7); font-weight: 500; }
+    .tkm-body { padding: 16px 20px 6px; }
+    .tkm-bio { font-size: 13.5px; line-height: 1.55; color: rgba(255,255,255,0.62); margin-bottom: 18px; }
+    .tkm-bio strong, .tkm-bio b { color: #fff; font-weight: 600; }
+    .tkm-promo { display: inline-block; margin-bottom: 14px; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #34d399; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.35); }
+    .tkm-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,255,255,0.42); margin: 0 0 10px; }
+    .tkm-types { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+    .tkm-type {
+      display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 14px 14px; border-radius: 14px; cursor: pointer;
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+      transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; -webkit-tap-highlight-color: transparent; outline: none;
+    }
+    .tkm-type:hover { border-color: rgba(255,255,255,0.22); }
+    .tkm-type:focus-visible { border-color: var(--hec-ice); }
+    .tkm-type.is-sel { background: linear-gradient(135deg, rgba(50,114,168,0.2), rgba(159,132,178,0.14)); border-color: rgba(159,132,178,0.65); box-shadow: 0 0 0 1px rgba(159,132,178,0.25), 0 10px 30px -12px rgba(50,114,168,0.6); }
+    .tkm-type.is-out { cursor: default; opacity: 0.5; }
+    .tkm-type.is-out .tkm-type-name, .tkm-type.is-out .tkm-type-price span { text-decoration: line-through; }
+    .tkm-radio { width: 20px; height: 20px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3); position: relative; transition: border-color 0.2s; }
+    .tkm-type.is-sel .tkm-radio { border-color: #c9b6d8; }
+    .tkm-type.is-sel .tkm-radio::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: linear-gradient(135deg, #6ba3d4, #c9b6d8); }
+    .tkm-type-name { font-size: 15px; font-weight: 700; color: #fff; }
+    .tkm-type-sub { font-size: 11.5px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+    .tkm-type-sub.is-hot { color: #f59e0b; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-size: 10.5px; }
+    .tkm-type-sub.is-out { color: #f87171; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-size: 10.5px; text-decoration: none; }
+    .tkm-type-price { text-align: right; font-size: 17px; font-weight: 700; color: #fff; white-space: nowrap; }
+    .tkm-type-price s { display: block; font-size: 11.5px; font-weight: 500; color: rgba(255,255,255,0.4); }
+    .tkm-qty { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding-top: 12px; margin-top: 2px; border-top: 1px solid rgba(255,255,255,0.08); cursor: default; }
+    .tkm-qty-label { font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.55); }
+    .tkm-stepper { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.12); }
+    .tkm-stepper button { width: 38px; height: 38px; border-radius: 9px; border: 0; background: rgba(255,255,255,0.07); color: #fff; font-size: 20px; line-height: 1; cursor: pointer; transition: background 0.15s; }
+    .tkm-stepper button:hover:not(:disabled) { background: rgba(255,255,255,0.16); }
+    .tkm-stepper button:disabled { opacity: 0.3; cursor: default; }
+    .tkm-stepper output { min-width: 32px; text-align: center; font-size: 17px; font-weight: 700; color: #fff; }
+    .tkm-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+    .tkm-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .tkm-field span { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.5); letter-spacing: 0.04em; }
+    .tkm-field input {
+      width: 100%; min-width: 0; height: 48px; padding: 0 14px; border-radius: 12px; font-size: 15px; color: #fff; font-family: 'Space Grotesk', sans-serif;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14); outline: none; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+    }
+    .tkm-field input::placeholder { color: rgba(255,255,255,0.3); }
+    .tkm-field input:focus { border-color: rgba(159,132,178,0.8); background: rgba(255,255,255,0.07); box-shadow: 0 0 0 3px rgba(159,132,178,0.18); }
+    .tkm-note { font-size: 11.5px; line-height: 1.45; color: rgba(255,255,255,0.4); margin: 0 0 6px; }
+    .tkm-error { font-size: 13px; color: #f87171; margin: 8px 0 4px; padding: 10px 12px; border-radius: 10px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); }
+    /* Pay button stays visible at the bottom while the overlay scrolls */
+    .tkm-foot {
+      position: sticky; bottom: 0; z-index: 2;
+      padding: 14px 20px calc(18px + max(0px, env(safe-area-inset-bottom) - 20px)); border-radius: 0 0 22px 22px;
+      background: linear-gradient(180deg, rgba(6,15,29,0) 0, var(--hec-bg) 14px);
+    }
+    .tkm-pay { width: 100%; min-height: 56px; font-size: 14.5px; }
+    .tkm-pay-sub { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; opacity: 0.8; padding: 3px 8px; border-radius: 999px; background: rgba(255,255,255,0.16); }
+    @media (max-width: 480px) {
+      .tkm-overlay { padding-left: 10px; padding-right: 10px; }
+      .tkm-fields { grid-template-columns: 1fr; }
+      .tkm-field input { font-size: 16px; } /* stops iOS zooming in on focus */
+      .tkm-body { padding: 14px 16px 4px; }
+      .tkm-foot { padding-left: 16px; padding-right: 16px; }
+      .tkm-head { padding: 0 16px 12px; }
+    }
+    .hec-skel .hec-media, .hec-skel .hec-stub { background: linear-gradient(100deg, #0a1628 30%, #12223a 50%, #0a1628 70%); background-size: 300% 100%; animation: hecSkel 1.4s ease-in-out infinite; }
+    @keyframes hecSkel { from { background-position: 100% 0; } to { background-position: 0 0; } }
+    @keyframes tkmIn { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
+    @keyframes hecIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes hecDrift { from { transform: translate3d(0,0,0) scale(1.02); } to { transform: translate3d(0,0,0) scale(1.12); } }
+    @keyframes hecPulse { 0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.7); } 70% { box-shadow: 0 0 0 8px rgba(52,211,153,0); } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }
+    @media (prefers-reduced-motion: reduce) { .hec, .hec-img, .hec::before, .hec-btn-main, .hec-live i, .tkm, .tkm-overlay { animation: none !important; } }
   </style>
 </head>
 <body>
@@ -340,6 +585,7 @@
 <script src="/static/jsqr.js"></script>
 
 <script src="/static/ui.jsx"></script>
+<script src="/static/legal.jsx"></script>
 <script src="/static/pages.jsx"></script>
 <script src="/static/admin_pages.jsx"></script>
 
@@ -356,12 +602,15 @@ const NAV_ITEMS = [
 
 // /qr/{code} — public discount link (QR codes). Behaves exactly like /buy, plus the discount while it's switched on.
 const QR_PATH = /^\/qr\/([^/]+)\/?$/;
+const LEGAL_PAGES = ['terms', 'privacy', 'cookies', 'accessibility'];
 
 function App() {
   const [page, setPage] = useState(() => {
     const p = new URLSearchParams(window.location.search);
     if (p.get('checkout')) return 'tickets';
     if (window.location.pathname === '/buy' || QR_PATH.test(window.location.pathname)) return 'events';
+    const legal = window.location.pathname.replace(/^\/|\/$/g, '');
+    if (LEGAL_PAGES.includes(legal)) return legal;
     return 'home';
   });
   const [user, setUser] = useState(() => window.RNTECH_AUTH.getUser());
@@ -469,6 +718,14 @@ function App() {
   const onAuth = useCallback((mode, email) => { setAuthModal(mode); setAuthEmail(email || ''); }, []);
   const onAuthSuccess = useCallback((u) => { setUser(u); setAuthModal(null); }, []);
   const onLogout = useCallback(() => { window.RNTECH_AUTH.logout(); setUser(null); }, []);
+  // Home on phones: the top bar stays out of the way until the visitor scrolls (see .nav-hide-top)
+  const [scrolledPastTop, setScrolledPastTop] = useState(() => window.scrollY > 90);
+  useEffect(() => {
+    const onScroll = () => setScrolledPastTop(window.scrollY > 90);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [page]);
   const onProfileSaved = useCallback((u) => { setUser(u); }, []);
   const onNavigate = useCallback((p, intent) => {
     setPage(p); setShowAdmin(false); window.scrollTo(0, 0);
@@ -476,6 +733,13 @@ function App() {
   }, []);
 
   const activePage = showAdmin ? 'admin' : page;
+
+  // Legal pages get their own shareable URL (/terms etc.); leaving one puts the address back to /
+  useEffect(() => {
+    const onLegalUrl = LEGAL_PAGES.includes(window.location.pathname.replace(/^\/|\/$/g, ''));
+    if (LEGAL_PAGES.includes(activePage)) window.history.replaceState({}, '', '/' + activePage);
+    else if (onLegalUrl) window.history.replaceState({}, '', '/');
+  }, [activePage]);
 
   const renderPage = () => {
     const props = { user, onAuth, onLogin: onAuthSuccess, onNavigate, onPlayMix: handlePlayMix, currentMix };
@@ -485,6 +749,8 @@ function App() {
       case 'mixes':   return React.createElement(PageMixes, props);
       case 'tickets': return React.createElement(PageTickets, { ...props, checkoutInfo });
       case 'contact': return React.createElement(PageContact, props);
+      case 'terms': case 'privacy': case 'cookies': case 'accessibility':
+                      return React.createElement(PageLegal, { doc: activePage, onNavigate });
       case 'admin':   return React.createElement(PageAdmin, { user });
       default:        return React.createElement(PageHome, props);
     }
@@ -494,7 +760,7 @@ function App() {
     React.createElement(StarField),
 
     // Desktop Nav
-    React.createElement('nav', null,
+    React.createElement('nav', { className: page === 'home' && !showAdmin && !scrolledPastTop ? 'nav-hide-top' : '' },
       React.createElement('div', { className: 'nav-logo', onClick: () => { setPage('home'); setShowAdmin(false); } },
         React.createElement('img', { src: '/static/uploads/logo-transparent.png', alt: 'RNTECH' })
       ),
@@ -541,6 +807,12 @@ function App() {
     React.createElement('main', { className: 'page-enter', key: activePage, style: { position: 'relative', zIndex: 1 } },
       renderPage()
     ),
+
+    // Discreet legal footer on public pages
+    !showAdmin && React.createElement(SiteFooter, { onNavigate }),
+
+    // Cookie choice (Meta Pixel only loads after Accept)
+    !showAdmin && React.createElement(CookieBanner, { onNavigate }),
 
     // Mobile Nav
     React.createElement('div', { className: 'mobile-nav' },

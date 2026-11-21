@@ -43,51 +43,143 @@ function InstagramLink({ handle }) {
   );
 }
 
+/* ─── Shared event "ticket" card: home hero, events list, event page ── */
+// Styles live in index.html under `.hec-*`. The hero video already has its slow zoom baked in
+// (CSS-scaling a playing <video> judders), so only still images get the CSS drift.
+function eventFacts(event) {
+  const d = event.date ? new Date(event.date + 'T12:00:00') : null;
+  const valid = !!d && !isNaN(d);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const daysTo = valid ? Math.round((new Date(event.date + 'T00:00:00') - today) / 86400000) : null;
+  const fmtTime = t => (t || '').replace(/^0/, '').replace(':00', '').replace(/\s/g, '').toLowerCase();
+  const open = (event.ticketTypes || []).filter(t => t.active && !t.soldOut && (t.capacity || 0) > (t.soldCount || 0));
+  const prices = open.map(t => t.price).filter(p => p > 0);
+  const min = prices.length ? Math.min(...prices) : null;
+  return {
+    valid,
+    month: valid ? d.toLocaleDateString('en-GB', { month:'short' }).toUpperCase() : '',
+    day: valid ? d.getDate() : '',
+    weekday: valid ? d.toLocaleDateString('en-GB', { weekday:'short' }).toUpperCase() : '',
+    countdown: daysTo == null || daysTo < 0 ? null : daysTo === 0 ? 'Tonight' : daysTo === 1 ? 'Tomorrow' : daysTo + ' days',
+    hours: [fmtTime(event.startTime), fmtTime(event.endTime)].filter(Boolean).join(' – '),
+    from: event.isFree || (open.length && min == null) ? 'Free' : min != null ? '£' + (min / 100).toFixed(min % 100 ? 2 : 0) : null,
+    soldOut: !event.isFree && (event.ticketTypes || []).some(t => t.active) && !open.length,
+    place: [event.venue, event.location].filter(Boolean).join(' · '),
+    past: event.status === 'past',
+  };
+}
+
+function EventMedia({ event, still }) {
+  // The still always renders underneath; the video sits on top invisible and only fades in once
+  // it is genuinely playing. If iOS refuses autoplay (Low Power Mode etc.) people just see the
+  // still with its CSS zoom — never Safari's big native play button.
+  const src = still || event.posterImage;
+  const [playing, setPlaying] = useState(false);
+  const [covered, setCovered] = useState(false);
+  const vidRef = React.useRef(null);
+  useEffect(() => { setPlaying(false); setCovered(false); }, [event.heroVideo]);
+  // Once the video has faded in, drop the still underneath so two layers aren't animating at once
+  useEffect(() => { if (!playing) return; const t = setTimeout(() => setCovered(true), 800); return () => clearTimeout(t); }, [playing]);
+  // Pause the video while it's scrolled off screen
+  useEffect(() => {
+    const v = vidRef.current; if (!v || !('IntersectionObserver' in window)) return;
+    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { const p = v.play(); if (p && p.catch) p.catch(()=>{}); } else v.pause(); }, { threshold: 0.05 });
+    io.observe(v); return () => io.disconnect();
+  }, [event.heroVideo]);
+  return React.createElement(React.Fragment, null,
+    src && React.createElement('img', { src, alt:'', className:'hec-img' + (covered ? ' is-covered' : '') }),
+    event.heroVideo && React.createElement('video', {
+      key:event.heroVideo, src:event.heroVideo, className:'hec-vid' + (playing ? ' is-playing' : ''),
+      autoPlay:true, muted:true, loop:true, playsInline:true, preload:'auto', disablePictureInPicture:true,
+      'aria-hidden':true, tabIndex:-1, controls:false,
+      onPlaying:() => setPlaying(true),
+      ref:v => { vidRef.current = v; if (v && !v._rtInit) { v._rtInit = true; v.muted = true; v.defaultMuted = true; v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); const p = v.play && v.play(); if (p && p.catch) p.catch(()=>{}); } } })
+  );
+}
+
+function DateBadge({ f }) {
+  return f.valid && React.createElement('div', { className:'hec-date' },
+    React.createElement('span', { className:'hec-date-m' }, f.month),
+    React.createElement('span', { className:'hec-date-d' }, f.day),
+    React.createElement('span', { className:'hec-date-w' }, f.weekday)
+  );
+}
+
+function HeroEventCard({ event, variant='hero', badge, onTickets, onDetails, onOpen, titleTag='h2' }) {
+  const f = eventFacts(event);
+  const stats = f.past
+    ? [ f.hours && { k:'Hours', v:f.hours }, f.place && { k:'Venue', v:event.venue || event.location } ]
+    : [ f.hours && { k:'Hours', v:f.hours },
+        f.soldOut ? { k:'Tickets', v:'Sold out' } : f.from && { k:'Tickets from', v:f.from },
+        f.countdown && { k:'Countdown', v:f.countdown } ];
+  const shown = stats.filter(Boolean);
+  const ticketLabel = event.registrationMode === 'interest' ? 'Register interest' : event.isFree ? 'Get free ticket' : 'Get tickets';
+  const canBuy = !f.past && onTickets && event.registrationMode !== 'closed';
+  return React.createElement('article', { className:'hec hec--' + variant + (f.past ? ' hec--past' : '') },
+    React.createElement('div', { className:'hec-media', onClick:onOpen, style:onOpen ? { cursor:'pointer' } : undefined },
+      React.createElement(EventMedia, { event }),
+      React.createElement('div', { className:'hec-shade' }),
+      React.createElement(DateBadge, { f }),
+      badge && React.createElement('div', { className:'hec-live' + (f.past ? ' is-past' : '') }, React.createElement('i'), badge),
+      React.createElement('div', { className:'hec-head' },
+        f.place && React.createElement('div', { className:'hec-place' }, f.place),
+        React.createElement(titleTag, { className:'hec-title' }, event.title)
+      )
+    ),
+    React.createElement('div', { className:'hec-perf', 'aria-hidden':true }),
+    React.createElement('div', { className:'hec-stub' },
+      shown.length > 0 && React.createElement('dl', { className:'hec-stats', style:{ gridTemplateColumns:`repeat(${shown.length},1fr)` } },
+        shown.map(s => React.createElement('div', { key:s.k, className:'hec-stat' },
+          React.createElement('dt', null, s.k),
+          React.createElement('dd', null, s.v)
+        ))
+      ),
+      (canBuy || onDetails) && React.createElement('div', { className:'hec-actions' + (canBuy && onDetails ? '' : ' is-single') },
+        canBuy && React.createElement('button', { className:'hec-btn hec-btn-main', onClick:e => { e.stopPropagation(); onTickets(); } },
+          ticketLabel, React.createElement('span', { 'aria-hidden':true }, '→')),
+        onDetails && React.createElement('button', { className:'hec-btn hec-btn-ghost', onClick:e => { e.stopPropagation(); onDetails(); } },
+          f.past ? 'View event' : (event.lineup || []).length ? 'View lineup' : 'Event details')
+      )
+    )
+  );
+}
+
 /* ─── HOME ─────────────────────────────────────────────────────────── */
 function PageHome({ user, onAuth, onNavigate, onPlayMix, currentMix }) {
-  const [events, setEvents] = useState([]);
+  // Events render instantly from the last visit's copy (then refresh), and load on their own
+  // rather than waiting on mixes + sponsors — that wait left the hero empty for ~2s on phones.
+  const [events, setEvents] = useState(() => { try { return JSON.parse(localStorage.getItem('rt_events_cache') || 'null') || []; } catch (e) { return []; } });
+  const [eventsLoaded, setEventsLoaded] = useState(false);
   const [mixes, setMixes] = useState([]);
   const [sponsors, setSponsors] = useState([]);
 
   useEffect(() => {
-    Promise.all([
-      window.RNTECH_API.getEvents(),
-      window.RNTECH_API.getMixes(),
-      window.RNTECH_API.getSponsors(),
-    ]).then(([ev, mx, sp]) => {
+    window.RNTECH_API.getEvents().then(ev => {
       setEvents(ev);
-      setMixes(mx);
-      setSponsors(sp);
-    }).catch(()=>{});
+      try { localStorage.setItem('rt_events_cache', JSON.stringify(ev)); } catch (e) {}
+    }).catch(()=>{}).finally(() => setEventsLoaded(true));
+    window.RNTECH_API.getMixes().then(setMixes).catch(()=>{});
+    window.RNTECH_API.getSponsors().then(setSponsors).catch(()=>{});
   }, []);
 
   const featured = events.find(e => e.featured);
 
   return React.createElement('div', null,
     // Hero
-    React.createElement('section', { style:{ minHeight:'92vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'120px 24px 80px',textAlign:'center',position:'relative' } },
+    React.createElement('section', { className:'home-hero', style:{ minHeight:'92vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'120px 24px 80px',textAlign:'center',position:'relative' } },
       React.createElement('div', { style:{ position:'absolute',inset:0,overflow:'hidden',pointerEvents:'none' } },
         React.createElement('div', { style:{ position:'absolute',top:'10%',left:'50%',transform:'translateX(-50%)',width:600,height:600,borderRadius:'50%',background:'radial-gradient(ellipse,rgba(50,114,168,0.15) 0%,transparent 70%)',filter:'blur(40px)' } }),
         React.createElement('div', { style:{ position:'absolute',top:'30%',left:'20%',width:300,height:300,borderRadius:'50%',background:'radial-gradient(ellipse,rgba(6,182,212,0.1) 0%,transparent 70%)',filter:'blur(40px)' } })
       ),
-      React.createElement('img', { src:'/static/uploads/logo-transparent.png',alt:'RNTECH',style:{ width:'min(280px,60vw)',marginBottom:32,filter:'brightness(0) invert(1) drop-shadow(0 0 30px rgba(50,114,168,0.8)) drop-shadow(0 0 60px rgba(6,182,212,0.4))',animation:'logoGlow 3s ease-in-out infinite alternate' } }),
-      React.createElement('div', { style:{display:'flex',flexDirection:'column',alignItems:'center',marginBottom:48,textAlign:'center'} },
+      React.createElement('img', { className:'home-hero-logo', src:'/static/uploads/logo-transparent.png',alt:'RNTECH',fetchpriority:'high',decoding:'async',style:{ width:'min(280px,60vw)',marginBottom:32,filter:'brightness(0) invert(1) drop-shadow(0 0 30px rgba(50,114,168,0.8)) drop-shadow(0 0 60px rgba(6,182,212,0.4))',animation:'logoGlow 3s ease-in-out infinite alternate' } }),
+      React.createElement('div', { className:'home-hero-title', style:{display:'flex',flexDirection:'column',alignItems:'center',marginBottom:48,textAlign:'center'} },
         React.createElement('p', { style:{ fontFamily:"'Ethnocentric Rg','Orbitron',sans-serif",fontWeight:200,fontStretch:'expanded',color:'rgba(255,255,255,0.45)',fontSize:'clamp(9px,1.4vw,13px)',letterSpacing:'0.38em',textTransform:'uppercase',lineHeight:1.4,margin:'0 0 10px',width:'min(280px,60vw)' } }, 'On a journey'),
         React.createElement('div', { style:{filter:'drop-shadow(0 0 10px rgba(255,255,255,0.8)) drop-shadow(0 0 28px rgba(160,210,255,0.6)) drop-shadow(0 0 55px rgba(100,170,255,0.35))'} },
-          React.createElement('p', { style:{ fontFamily:"'Ethnocentric Rg','Orbitron',sans-serif",fontWeight:200,fontStretch:'expanded',fontSize:'clamp(26px,4.2vw,50px)',letterSpacing:'0.08em',textTransform:'uppercase',lineHeight:1.1,margin:0,whiteSpace:'nowrap', background:'linear-gradient(90deg,rgba(180,215,255,0.85) 0%,#ffffff 20%,rgba(230,245,255,1) 40%,#ffffff 55%,rgba(200,225,255,0.9) 75%,#ffffff 90%,rgba(180,215,255,0.85) 100%)',backgroundSize:'250% 100%',backgroundClip:'text',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',animation:'starShimmer 4s linear infinite' } }, 'To the stars')
+          React.createElement('p', { className:'home-hero-stars', style:{ fontFamily:"'Ethnocentric Rg','Orbitron',sans-serif",fontWeight:200,fontStretch:'expanded',fontSize:'clamp(26px,4.2vw,50px)',letterSpacing:'0.08em',textTransform:'uppercase',lineHeight:1.1,margin:0,whiteSpace:'nowrap', background:'linear-gradient(90deg,rgba(180,215,255,0.85) 0%,#ffffff 20%,rgba(230,245,255,1) 40%,#ffffff 55%,rgba(200,225,255,0.9) 75%,#ffffff 90%,rgba(180,215,255,0.85) 100%)',backgroundSize:'250% 100%',backgroundClip:'text',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',animation:'starShimmer 4s linear infinite' } }, 'To the stars')
         )
       ),
-      featured&&React.createElement(FuturisticCard, { active:true, style:{ maxWidth:560,marginBottom:40,textAlign:'center' } },
-        featured.posterImage&&React.createElement('img', { src:featured.posterImage, alt:featured.title, style:{ width:'100%',height:160,objectFit:'cover',objectPosition:'center 60%',display:'block',marginBottom:16 } }),
-        React.createElement(Chip, { label:'Next Event', color:'#10b981' }),
-        React.createElement('h2', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:'clamp(22px,4vw,36px)',color:'#fff',margin:'12px 0 8px',textTransform:'uppercase',letterSpacing:'-0.02em' } }, featured.title),
-        React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'#3272a8',fontWeight:600,marginBottom:4 } }, [featured.displayDate,featured.startTime].filter(Boolean).join(' · ')),
-        React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:14,marginBottom:24 } }, [featured.venue,featured.location].filter(Boolean).join(', ')),
-        React.createElement('div', { style:{ display:'flex',gap:12,justifyContent:'center',flexWrap:'wrap' } },
-          React.createElement(GlowButton, { onClick:()=>onNavigate('events', { eventId:featured.id, action:'ticket' }), variant:'primary' }, featured.registrationMode==='interest'?'Register Interest':'Get Tickets'),
-          React.createElement(GlowButton, { onClick:()=>onNavigate('events', { eventId:featured.id, action:'detail' }), variant:'ghost' }, 'View Lineup')
-        )
-      ),
+      !featured&&!eventsLoaded&&React.createElement('div', { className:'hec hec--hero hec-skel', 'aria-hidden':true }, React.createElement('div', { className:'hec-media' }), React.createElement('div', { className:'hec-stub', style:{ height:150 } })),
+      featured&&React.createElement(HeroEventCard, { event:featured, badge:'Next event', onTickets:()=>onNavigate('events', { eventId:featured.id, action:'ticket' }), onDetails:()=>onNavigate('events', { eventId:featured.id, action:'detail' }) }),
       !user&&React.createElement('button', { onClick:()=>onAuth('register'), style:{ background:'none',border:'none',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:14,textDecoration:'underline' } },'Create an account to save your tickets →')
     ),
 
@@ -155,6 +247,16 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
   }, [promoCode]);
 
   // Display only — the server recomputes the real price from the code at checkout
+  useEffect(() => {
+    if (!ticketEvent) return;
+    if (!selectedType || selectedType.eventId !== ticketEvent.id) {
+      const first = (ticketEvent.ticketTypes||[]).find(t => t.active && !t.soldOut && (t.capacity||0) > (t.soldCount||0));
+      if (first) { setSelectedType(first); setQuantity(1); }
+    }
+    const onKey = e => { if (e.key === 'Escape') setTicketEvent(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ticketEvent]);
   const promoPrice = (price) => promo && price > 0 ? price - Math.round(price * promo.discountBp / 10000) : price;
 
   const openTicketModal = (event) => {
@@ -265,6 +367,8 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
     doPurchase();
   };
 
+  const openEvent = (e) => { window.scrollTo(0, 0); setSelected(e); };
+
   if (loading) return React.createElement('div',{style:{padding:'120px 24px'}},React.createElement(Spinner));
   const upcoming = events.filter(e=>e.status==='upcoming');
   const past = events.filter(e=>e.status==='past');
@@ -274,51 +378,86 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
   // detail / interest form) is active below — it used to live only inside the default list
   // branch, so buying a ticket from the event-detail page silently set ticketEvent but the
   // modal never rendered (that branch returned before ever reaching this code).
-  const ticketModal = ticketEvent&&React.createElement('div', { className:'modal-overlay', style:{ position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(12px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20 }, onClick:()=>setTicketEvent(null) },
-    React.createElement('div', { className:'modal-sheet', onClick:e=>e.stopPropagation(), style:{ background:'#040c18',border:'1px solid rgba(50,114,168,0.3)',borderRadius:0,padding:16,width:'100%',maxWidth:440,maxHeight:'94vh',overflowY:'auto',boxShadow:'0 0 60px rgba(50,114,168,0.2)' } },
-      React.createElement('div',{className:'modal-handle'}),
-      React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:16,color:'#fff',margin:'0 0 3px',textTransform:'uppercase' } },'Get Tickets'),
-      React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:10,marginBottom:8 } }, ticketEvent.title+' · '+ticketEvent.displayDate),
-      ticketEvent.ticketBannerImage&&React.createElement('img', { src:ticketEvent.ticketBannerImage, alt:ticketEvent.title, style:{ width:'100%',height:85,objectFit:'cover',objectPosition:'center 75%',display:'block',marginBottom:8 } }),
-      ticketEvent.ticketBio&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.6)',fontSize:10.5,lineHeight:1.4,marginBottom:10 } }, renderBio(ticketEvent.ticketBio)),
-      promo&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'#10b981',fontSize:12,fontWeight:700,marginBottom:8,letterSpacing:'0.04em',textTransform:'uppercase' } }, promo.discountLabel+' applied'),
-      React.createElement('div', { style:{ display:'flex',flexDirection:'column',gap:5,marginBottom:10 } },
-        (ticketEvent.ticketTypes||[]).filter(t=>t.active).map(t=>{
-          const isSel = selectedType&&selectedType.id===t.id;
-          const remaining = Math.max((t.capacity||0)-(t.soldCount||0), 0);
-          const soldOut = t.soldOut||remaining<=0;
-          const maxQty = Math.max(Math.min(10, remaining), soldOut?0:1);
-          return React.createElement('div', { key:t.id, onClick:soldOut?undefined:()=>{ if(isSel){ setSelectedType(null); } else { setSelectedType(t); setQuantity(1); } }, style:{ position:'relative',overflow:'visible',background:isSel?'rgba(50,114,168,0.15)':'rgba(255,255,255,0.03)',border:`1px solid ${isSel?'rgba(50,114,168,0.5)':'rgba(255,255,255,0.1)'}`,borderRadius:0,padding:'8px 10px',cursor:soldOut?'default':'pointer',display:'flex',justifyContent:'space-between',alignItems:'center' } },
-            React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,color:soldOut?'rgba(255,255,255,0.35)':'#fff',textDecoration:soldOut?'line-through':'none' } }, t.name),
-            soldOut
-              ? React.createElement('div', { style:{ display:'flex',alignItems:'center',gap:8 } },
-                  t.price>0&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,color:'rgba(255,255,255,0.35)',textDecoration:'line-through' } }, '£'+(t.price/100).toFixed(2)),
-                  React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:13,letterSpacing:'0.06em',color:'#e5484d',textTransform:'uppercase' } }, 'Sold Out')
-                )
-              : isSel
-              ? React.createElement('div', { onClick:e=>e.stopPropagation(), style:{ display:'flex',alignItems:'center',gap:8,border:'1px solid rgba(255,255,255,0.2)',padding:'2px 8px' } },
-                  React.createElement('button', { onClick:()=>setQuantity(q=>Math.max(1,q-1)), disabled:quantity<=1, style:{ background:'none',border:'none',color:quantity<=1?'rgba(255,255,255,0.2)':'#fff',fontSize:15,cursor:quantity<=1?'default':'pointer',fontFamily:"'Space Grotesk',sans-serif",padding:'0 3px' } }, '−'),
-                  React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'#fff',fontSize:13,fontWeight:700,minWidth:14,textAlign:'center' } }, quantity),
-                  React.createElement('button', { onClick:()=>setQuantity(q=>Math.min(maxQty,q+1)), disabled:quantity>=maxQty, style:{ background:'none',border:'none',color:quantity>=maxQty?'rgba(255,255,255,0.2)':'#fff',fontSize:15,cursor:quantity>=maxQty?'default':'pointer',fontFamily:"'Space Grotesk',sans-serif",padding:'0 3px' } }, '+')
-                )
-              : React.createElement('div', { style:{ display:'flex',alignItems:'center',gap:8 } },
-                  t.nearlyGone&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:9.5,letterSpacing:'0.05em',textTransform:'uppercase',color:'#f59e0b' } }, 'Nearly Gone'),
-                  promo&&t.price>0&&React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,fontSize:12,color:'rgba(255,255,255,0.35)',textDecoration:'line-through' } }, '£'+(t.price/100).toFixed(2)),
-                  React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:14,color:t.price===0||promo?'#10b981':'#fff' } }, t.price===0?'FREE':'£'+(promoPrice(t.price)/100).toFixed(2))
-                )
-          );
-        })
+  // Ticket checkout sheet. Floats centred on every screen size (it used to dock to the bottom on
+  // phones and get lost on tall screens); the overlay itself scrolls if the content is taller
+  // than the screen, and the pay button stays pinned to the bottom of the card. Styles: `.tkm-*`.
+  const tmTypes = ticketEvent ? (ticketEvent.ticketTypes||[]).filter(t=>t.active) : [];
+  const tmFacts = ticketEvent ? eventFacts(ticketEvent) : null;
+  const tmTotal = selectedType ? promoPrice(selectedType.price) * quantity : 0;
+  const tmLabel = buying ? 'Processing…'
+    : !selectedType ? 'Choose a ticket'
+    : selectedType.price === 0 ? (quantity > 1 ? `Confirm ${quantity} free tickets` : 'Confirm free ticket')
+    : `Pay £${(tmTotal/100).toFixed(2)}`;
+  const ticketModal = ticketEvent&&React.createElement('div', { className:'tkm-overlay', role:'dialog', 'aria-modal':true, 'aria-label':'Get tickets for '+ticketEvent.title, onClick:()=>setTicketEvent(null) },
+    React.createElement('div', { className:'tkm', onClick:e=>e.stopPropagation() },
+      React.createElement('div', { className:'tkm-media' },
+        React.createElement(EventMedia, { event:ticketEvent, still:ticketEvent.ticketBannerImage }),
+        React.createElement('div', { className:'hec-shade' }),
+        React.createElement('button', { className:'tkm-close', onClick:()=>setTicketEvent(null), 'aria-label':'Close' }, '×'),
+        React.createElement('div', { className:'tkm-head' },
+          React.createElement('div', { className:'tkm-eyebrow' }, 'Get tickets'),
+          React.createElement('h3', { className:'tkm-title' }, ticketEvent.title),
+          React.createElement('div', { className:'tkm-meta' }, [ticketEvent.displayDate, tmFacts.hours, tmFacts.place].filter(Boolean).join('  ·  '))
+        )
       ),
-      React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8 } },
-        React.createElement('input', { placeholder:'Your Name',value:holderName,onChange:e=>setHolderName(e.target.value),style:{...inputStyle,marginBottom:0} }),
-        React.createElement('input', { type:'email',placeholder:'Your Email',value:holderEmail,onChange:e=>setHolderEmail(e.target.value),style:{...inputStyle,marginBottom:0} })
+      React.createElement('div', { className:'tkm-body' },
+        ticketEvent.ticketBio&&React.createElement('div', { className:'tkm-bio' }, renderBio(ticketEvent.ticketBio)),
+        promo&&React.createElement('div', { className:'tkm-promo' }, promo.discountLabel+' applied'),
+        React.createElement('div', { className:'tkm-label' }, 'Choose your ticket'),
+        React.createElement('div', { className:'tkm-types', role:'radiogroup' },
+          tmTypes.map(t=>{
+            const isSel = selectedType&&selectedType.id===t.id;
+            const remaining = Math.max((t.capacity||0)-(t.soldCount||0), 0);
+            const soldOut = t.soldOut||remaining<=0;
+            const maxQty = Math.max(Math.min(10, remaining), soldOut?0:1);
+            const price = t.price===0 ? 'Free' : '£'+(promoPrice(t.price)/100).toFixed(2);
+            return React.createElement('div', { key:t.id, role:'radio', 'aria-checked':!!isSel, 'aria-disabled':soldOut, tabIndex:soldOut?-1:0,
+                className:'tkm-type'+(isSel?' is-sel':'')+(soldOut?' is-out':''),
+                onClick:soldOut?undefined:()=>{ if(!isSel){ setSelectedType(t); setQuantity(1); } },
+                onKeyDown:e=>{ if(!soldOut&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); setSelectedType(t); setQuantity(1); } } },
+              React.createElement('span', { className:'tkm-radio', 'aria-hidden':true }),
+              React.createElement('div', { className:'tkm-type-main' },
+                React.createElement('div', { className:'tkm-type-name' }, t.name),
+                (soldOut||t.nearlyGone||t.description)&&React.createElement('div', { className:'tkm-type-sub'+(soldOut?' is-out':t.nearlyGone?' is-hot':'') },
+                  soldOut?'Sold out':t.nearlyGone?'Nearly gone':t.description)
+              ),
+              React.createElement('div', { className:'tkm-type-price' },
+                promo&&t.price>0&&!soldOut&&React.createElement('s', null, '£'+(t.price/100).toFixed(2)),
+                React.createElement('span', null, price)
+              ),
+              isSel&&!soldOut&&React.createElement('div', { className:'tkm-qty', onClick:e=>e.stopPropagation() },
+                React.createElement('span', { className:'tkm-qty-label' }, 'Quantity'),
+                React.createElement('div', { className:'tkm-stepper' },
+                  React.createElement('button', { type:'button', onClick:()=>setQuantity(q=>Math.max(1,q-1)), disabled:quantity<=1, 'aria-label':'One fewer' }, '−'),
+                  React.createElement('output', null, quantity),
+                  React.createElement('button', { type:'button', onClick:()=>setQuantity(q=>Math.min(maxQty,q+1)), disabled:quantity>=maxQty, 'aria-label':'One more' }, '+')
+                )
+              )
+            );
+          })
+        ),
+        React.createElement('div', { className:'tkm-label' }, 'Your details'),
+        React.createElement('div', { className:'tkm-fields' },
+          React.createElement('label', { className:'tkm-field' },
+            React.createElement('span', null, 'Name'),
+            React.createElement('input', { autoComplete:'name', placeholder:'Full name', value:holderName, onChange:e=>setHolderName(e.target.value) })
+          ),
+          React.createElement('label', { className:'tkm-field' },
+            React.createElement('span', null, 'Email'),
+            React.createElement('input', { type:'email', autoComplete:'email', inputMode:'email', placeholder:'you@example.com', value:holderEmail, onChange:e=>setHolderEmail(e.target.value) })
+          )
+        ),
+        !user&&React.createElement('p', { className:'tkm-note' }, "We'll set up a free RNTECH account with these details so your ticket is always there under My Tickets."),
+        buyError&&React.createElement('div', { className:'tkm-error' }, buyError)
       ),
-      !user&&React.createElement('p', { style:{fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.3)',fontSize:9.5,margin:'0 0 6px',lineHeight:1.35} },"We'll set up a free RNTECH account with these details so your ticket is always there under My Tickets."),
-      buyError&&React.createElement('div', { style:{ color:'#ef4444',fontSize:11,marginBottom:6,fontFamily:"'Space Grotesk',sans-serif" } }, buyError),
-      React.createElement(GlowButton, { onClick:doTicket,style:{ width:'100%',marginTop:0,padding:'10px 18px'},disabled:buying },
-        buying?'Processing…':selectedType&&selectedType.price===0
-          ?(quantity>1?`Confirm ${quantity} Free Tickets`:'Confirm Free Ticket')
-          :(selectedType&&(quantity>1||promo)?`Pay £${(promoPrice(selectedType.price)*quantity/100).toFixed(2)}${quantity>1?` — ${quantity} Tickets`:''}`:'Confirm Purchase'))
+      React.createElement('div', { className:'tkm-foot' },
+        React.createElement(TicketTermsNote),
+        React.createElement('button', { className:'hec-btn hec-btn-main tkm-pay', onClick:doTicket, disabled:buying||!selectedType },
+          React.createElement('span', { className:'tkm-pay-label' }, tmLabel),
+          selectedType&&!buying&&quantity>1&&React.createElement('span', { className:'tkm-pay-sub' }, quantity+' tickets'),
+          selectedType&&!buying&&React.createElement('span', { 'aria-hidden':true }, '→')
+        )
+      )
     )
   );
 
@@ -366,14 +505,14 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
       ),
       upcoming.length>0&&React.createElement('div', { style:{ marginBottom:48 } },
         React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:20 } },'Upcoming'),
-        React.createElement('div', { style:{ display:'grid',gap:20,gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))' } },
-          upcoming.map(e=>React.createElement(EventCard, { key:e.id,event:e,onSelect:setSelected,onRegister:handleRegister }))
+        React.createElement('div', { style:{ display:'grid',gap:20,gridTemplateColumns:'repeat(auto-fill,minmax(min(100%,340px),1fr))',gap:24 } },
+          upcoming.map(e=>React.createElement(HeroEventCard, { key:e.id, event:e, variant:'grid', titleTag:'h3', badge:e.featured?'Next event':'Upcoming', onOpen:()=>openEvent(e), onDetails:()=>openEvent(e), onTickets:()=>handleRegister(e) }))
         )
       ),
       past.length>0&&React.createElement('div', null,
         React.createElement('h3', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.4)',fontSize:12,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:20 } },'Past Events'),
-        React.createElement('div', { style:{ display:'grid',gap:20,gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))' } },
-          past.map(e=>React.createElement(EventCard, { key:e.id,event:e,onSelect:setSelected,onRegister:handleRegister }))
+        React.createElement('div', { style:{ display:'grid',gap:20,gridTemplateColumns:'repeat(auto-fill,minmax(min(100%,340px),1fr))',gap:24 } },
+          past.map(e=>React.createElement(HeroEventCard, { key:e.id, event:e, variant:'grid', titleTag:'h3', badge:'Past event', onOpen:()=>openEvent(e), onDetails:()=>openEvent(e) }))
         )
       )
     ),
@@ -385,15 +524,8 @@ function PageEvents({ user, onAuth, onLogin, onPlayMix, pendingEventIntent, onCo
 function EventDetail({ event, user, onBack, onRegister }) {
   return React.createElement('div', { style:{ padding:'100px 24px 100px',maxWidth:800,margin:'0 auto' } },
     React.createElement('button', { onClick:onBack, style:{ background:'none',border:'none',cursor:'pointer',fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',fontSize:14,marginBottom:32,display:'flex',alignItems:'center',gap:8 } },'← Back to Events'),
-    event.posterImage&&React.createElement('img', { src:event.posterImage,alt:event.title,style:{ width:'100%',borderRadius:0,objectFit:'cover',maxHeight:400,marginBottom:32 } }),
-    React.createElement('div', { style:{ display:'flex',gap:8,flexWrap:'wrap',marginBottom:16 } },
-      React.createElement(Chip, { label:event.status==='upcoming'?'Upcoming':'Past', color:event.status==='upcoming'?'#3272a8':'#64748b' }),
-      event.isFree&&React.createElement(Chip, { label:'FREE ENTRY', color:'#10b981' })
-    ),
-    React.createElement('h1', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:'clamp(28px,5vw,52px)',color:'#fff',margin:'0 0 12px',textTransform:'uppercase',letterSpacing:'-0.02em' } }, event.title),
-    React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'#3272a8',fontSize:18,fontWeight:600,marginBottom:4 } }, [event.displayDate,event.startTime&&event.endTime?event.startTime+' – '+event.endTime:event.startTime].filter(Boolean).join(' · ')),
-    React.createElement('div', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.5)',marginBottom:32 } }, [event.venue,event.location].filter(Boolean).join(', ')),
-    React.createElement('p', { style:{ fontFamily:"'Space Grotesk',sans-serif",color:'rgba(255,255,255,0.7)',fontSize:16,lineHeight:1.8,marginBottom:40 } }, event.description),
+    React.createElement(HeroEventCard, { event, variant:'detail', titleTag:'h1', badge:event.status==='past'?'Past event':event.featured?'Next event':'Upcoming', onTickets:()=>onRegister(event) }),
+    event.description&&React.createElement('div', { className:'evd-copy' }, event.description.split(/\n{2,}/).map((para,i)=>React.createElement('p', { key:i }, para))),
     event.lineup&&event.lineup.length>0&&React.createElement('div', null,
       React.createElement('h2', { style:{ fontFamily:"'Space Grotesk',sans-serif",fontWeight:800,fontSize:22,color:'#fff',textTransform:'uppercase',marginBottom:20 } },'Lineup'),
       React.createElement('div', { style:{ display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12,marginBottom:40 } },
@@ -410,8 +542,8 @@ function EventDetail({ event, user, onBack, onRegister }) {
         React.createElement('span', { style:{ color:'#10b981',fontSize:16 } },'✓'), g
       ))
     ),
-    event.status==='upcoming'&&React.createElement(GlowButton, { onClick:()=>onRegister(event) },
-      event.registrationMode==='interest'?'Register Interest':event.isFree?'Get Free Ticket':'Buy Ticket')
+    event.status==='upcoming'&&event.registrationMode!=='closed'&&React.createElement('button', { className:'hec-btn hec-btn-main evd-cta', onClick:()=>onRegister(event) },
+      event.registrationMode==='interest'?'Register interest':event.isFree?'Get free ticket':'Get tickets', React.createElement('span', { 'aria-hidden':true }, '→'))
   );
 }
 
@@ -423,6 +555,7 @@ function PageMixes({ user, currentMix, onPlayMix }) {
   useEffect(() => {
     window.RNTECH_API.getMixes().then(mx => { setMixes(mx); setLoading(false); }).catch(()=>setLoading(false));
   }, []);
+
 
   if (loading) return React.createElement('div',{style:{padding:'120px 24px'}},React.createElement(Spinner));
 
@@ -553,6 +686,7 @@ function InviteModal({ token, onClose }) {
         React.createElement('input', { placeholder:'Your Name',value:holderName,onChange:e=>setHolderName(e.target.value),style:inputStyle }),
         React.createElement('input', { type:'email',placeholder:'Your Email',value:holderEmail,onChange:e=>setHolderEmail(e.target.value),style:inputStyle }),
         error && React.createElement('div', { style:{ color:'#ef4444',fontSize:13,marginBottom:12,fontFamily:"'Space Grotesk',sans-serif" } }, error),
+        React.createElement(TicketTermsNote),
         React.createElement(GlowButton, { onClick:buy, style:{ width:'100%' }, disabled:buying||!selectedType },
           buying?'Redirecting…':selectedType&&quantity>1?`Pay £${(selectedType.discountedPrice*quantity/100).toFixed(2)} — ${quantity} Tickets`:'Pay & Claim Ticket')
       )
@@ -637,6 +771,7 @@ function OfferModal({ token, onClose }) {
           )
         ),
         error && React.createElement('div', { style:{ color:'#ef4444',fontSize:13,marginBottom:12,fontFamily:FSG } }, error),
+        React.createElement(TicketTermsNote),
         React.createElement(GlowButton, { onClick:buy, style:{ width:'100%' }, disabled:buying || !selectedType },
           buying ? 'Redirecting…' : selectedType && quantity > 1 ? `Pay £${(selectedType.discountedPrice * quantity / 100).toFixed(2)} — ${quantity} Tickets` : 'Pay & Claim Ticket')
       )
@@ -696,6 +831,7 @@ function PageTickets({ user, onAuth, checkoutInfo }) {
     React.createElement('span', { style:{ display:'inline-block',width:12 } }),
     React.createElement(GlowButton, { onClick:()=>onAuth('register'),variant:'ghost' },'Create Account')
   );
+
 
   if (loading) return React.createElement('div',{style:{padding:'120px 24px'}},React.createElement(Spinner));
 

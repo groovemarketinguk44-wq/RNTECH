@@ -4,14 +4,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from sqlalchemy import text, inspect as sa_inspect
 from .database import engine, SessionLocal
 from .models import Base
-from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout, offers, promos, visitors
+from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout, offers, promos, visitors, door, widget
 from .routes.campaigns import process_pending_sends, run_throttled_sends, scan_bounces
 from .routes.inbox_routes import sweep_side_folders_to_inbox
 
@@ -91,6 +91,8 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
         _migrate("events",          "registration_mode", "TEXT DEFAULT 'open'")
+        _migrate("events",          "door_token",        "TEXT")
+        _migrate("events",          "hero_video",        "TEXT")
         _migrate("users",           "first_name",        "TEXT")
         _migrate("users",           "last_name",         "TEXT")
         _migrate("users",           "instagram",         "TEXT")
@@ -173,6 +175,18 @@ app.add_middleware(
 
 
 @app.middleware("http")
+async def redirect_www_to_apex(request, call_next):
+    # Push notifications (OneSignal) only work on the single origin registered in OneSignal
+    # (https://rntech.live) — on www they silently never initialise. GET/HEAD only, so
+    # webhooks or API POSTs that point at www keep working.
+    host = request.headers.get("host", "")
+    if host.startswith("www.") and request.method in ("GET", "HEAD"):
+        url = request.url.replace(netloc=host[4:], scheme="https")
+        return RedirectResponse(str(url), status_code=301)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def no_cache_static_app_code(request, call_next):
     # /static serves the SPA's own JS (ui.jsx, pages.jsx, admin_pages.jsx, api.js, auth.js),
     # not just images — Starlette's default StaticFiles response has no Cache-Control, only
@@ -202,6 +216,8 @@ for router in [
     offers.router,
     promos.router,
     visitors.router,
+    door.router,
+    widget.router,
 ]:
     app.include_router(router, prefix="/api")
 
@@ -219,6 +235,10 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR / "static")), name="
 @app.get("/admin")
 @app.get("/buy")
 @app.get("/qr/{code}")
+@app.get("/terms")
+@app.get("/privacy")
+@app.get("/cookies")
+@app.get("/accessibility")
 def serve_app(code: str = ""):
     # Always revalidate — this is a single-page app, so a stale cached copy in a
     # long-lived open tab silently keeps running old frontend code indefinitely.
@@ -226,6 +246,12 @@ def serve_app(code: str = ""):
         str(FRONTEND_DIR / "index.html"),
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
+
+
+@app.get("/door/{token}")
+def serve_door(token: str):
+    # Door staff page: its own tiny shell, no site nav, no admin, no tracking
+    return FileResponse(str(FRONTEND_DIR / "door.html"), headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
 @app.get("/health")

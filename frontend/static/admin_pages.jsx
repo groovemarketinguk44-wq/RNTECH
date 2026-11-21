@@ -482,46 +482,114 @@ function isReallySubscribed(OneSignal) {
   return !!(OneSignal.User.PushSubscription.optedIn && OneSignal.User.PushSubscription.id);
 }
 
+// iPhone/iPad only allow web push from the Home Screen app, never from a Safari tab
+function iosNeedsHomeScreen() {
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  return ios && !standalone;
+}
+
+// iPhone home-screen widget (free Scriptable app): latest event's name, tickets sold and profit.
+// The script has a secret link baked in — "New link" kills the old one (see backend/routes/widget.py).
+function PhoneWidget() {
+  const [open, setOpen] = useState(false);
+  const [info, setInfo] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState('');
+  const fetchLink = (reset) => {
+    setErr('');
+    (reset ? window.RNTECH_API.resetWidgetLink() : window.RNTECH_API.widgetLink())
+      .then(i => { setInfo(i); setCopied(false); }).catch(e => setErr(e.message || 'Could not get the widget script'));
+  };
+  const toggle = () => { const next = !open; setOpen(next); if (next && !info) fetchLink(false); };
+  const copy = () => {
+    const done = () => { setCopied(true); setTimeout(() => setCopied(false), 2500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(info.script).then(done).catch(() => setErr('Copy failed — long-press the box and copy')); else done();
+  };
+  const btn = { ...FS, background:'rgba(50,114,168,0.15)', border:'1px solid rgba(50,114,168,0.5)', color:'#fff', padding:'10px 14px', fontSize:12, fontWeight:800, textTransform:'uppercase', letterSpacing:'0.06em', cursor:'pointer' };
+  const step = { ...FS, fontSize:13, color:'rgba(255,255,255,0.7)', lineHeight:1.7, margin:0, paddingLeft:18 };
+  return React.createElement('div', { style:{ border:'1px solid rgba(255,255,255,0.08)', background:'rgba(6,12,26,0.6)', marginBottom:24 } },
+    React.createElement('button', { onClick:toggle, style:{ ...FS, width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', background:'none', border:'none', color:'#fff', padding:'12px 16px', fontSize:14, fontWeight:700, cursor:'pointer', textAlign:'left' } },
+      '📱  Phone widget — latest event, tickets & profit', React.createElement('span', { style:{ color:'rgba(255,255,255,0.4)', fontSize:12 } }, open ? 'Hide' : 'Show')),
+    open && React.createElement('div', { style:{ padding:'0 16px 16px' } },
+      err && React.createElement('div', { style:{ ...FS, color:'#ef4444', fontSize:13, marginBottom:8 } }, err),
+      !info && !err && React.createElement('div', { style:{ ...FS, color:'rgba(255,255,255,0.5)', fontSize:13 } }, 'Getting script…'),
+      info && React.createElement(React.Fragment, null,
+        React.createElement('ol', { style:step },
+          React.createElement('li', null, 'Install the free ', React.createElement('a', { href:'https://apps.apple.com/app/scriptable/id1405459188', target:'_blank', rel:'noopener', style:{ color:'#3272a8' } }, 'Scriptable'), ' app.'),
+          React.createElement('li', null, 'Tap ', React.createElement('b', null, 'Copy script'), ' below (do this on your phone).'),
+          React.createElement('li', null, 'In Scriptable tap ', React.createElement('b', null, '+'), ', paste, name it ', React.createElement('b', null, 'RNTECH'), '.'),
+          React.createElement('li', null, 'Long-press your Home Screen → ', React.createElement('b', null, '+'), ' → Scriptable → pick a size → tap the widget → Script: ', React.createElement('b', null, 'RNTECH'), '.')),
+        React.createElement('div', { style:{ ...FS, fontSize:12, color:'rgba(255,255,255,0.4)', margin:'8px 0 10px' } },
+          'Shows the next event (the last one if nothing is booked). Profit matches the Payments card. Refreshes about every 15 minutes.'),
+        React.createElement('textarea', { readOnly:true, value:info.script, onFocus:e=>e.target.select(), rows:4, style:{ ...inputSt, fontSize:11, fontFamily:'monospace', resize:'vertical' } }),
+        React.createElement('div', { style:{ display:'flex', gap:8, flexWrap:'wrap' } },
+          React.createElement('button', { onClick:copy, style:btn }, copied ? '✓ Copied' : 'Copy script'),
+          React.createElement('button', { onClick:() => { if (confirm('Make a new widget link? Widgets using the old script stop working until you paste the new one.')) fetchLink(true); },
+            style:{ ...btn, background:'none', border:'1px solid rgba(239,68,68,0.4)', color:'#ef4444' } }, 'New link'))
+      )
+    )
+  );
+}
+
 function SaleNotifications() {
-  const [status, setStatus] = useState('checking'); // checking | off | on | error
+  const [status, setStatus] = useState('checking'); // checking | off | on | error | ios-install | unsupported
+  const [detail, setDetail] = useState('');
+  const osRef = useRef(null);
 
   useEffect(() => {
+    if (iosNeedsHomeScreen()) { setStatus('ios-install'); return; }
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) { setStatus('unsupported'); return; }
+    // If the SDK never initialises (blocked script, wrong Site URL in OneSignal) say so instead of hanging
+    const timer = setTimeout(() => { if (!osRef.current) { setStatus('error'); setDetail('Notification service did not load'); } }, 10000);
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     window.OneSignalDeferred.push(async (OneSignal) => {
+      osRef.current = OneSignal;
+      clearTimeout(timer);
       try { setStatus(isReallySubscribed(OneSignal) ? 'on' : 'off'); }
-      catch (e) { setStatus('error'); }
+      catch (e) { setStatus('error'); setDetail(String(e?.message || e)); }
     });
+    return () => clearTimeout(timer);
   }, []);
 
-  const enable = () => {
+  const enable = async () => {
+    const OneSignal = osRef.current;
+    if (!OneSignal) return;
     setStatus('checking');
-    // Use OneSignal's own Slidedown prompt UI rather than driving Notifications.requestPermission()/
-    // PushSubscription.optIn() by hand — it owns the whole permission+subscribe flow internally and
-    // is what actually works reliably across browsers (confirmed working this way on TattLab/InkinStudioz).
-    window.OneSignalDeferred.push(async (OneSignal) => {
-      try {
-        await OneSignal.Slidedown.promptPush();
-        await new Promise(r => setTimeout(r, 1500)); // give the SDK a moment to actually register the subscription
-        if (isReallySubscribed(OneSignal)) {
-          await OneSignal.User.addTag('role', 'admin');
-          setStatus('on');
-        } else {
-          setStatus('error');
-        }
-      } catch (e) { setStatus('error'); }
-    });
+    try {
+      // Ask for permission directly inside the tap — iOS only shows the system prompt
+      // when it's triggered by a user gesture, which a slidedown/deferred call can lose.
+      await OneSignal.Notifications.requestPermission();
+      if (Notification.permission === 'denied') {
+        setStatus('error'); setDetail('Notifications are blocked for this site — allow them in your phone/browser settings');
+        return;
+      }
+      await OneSignal.User.PushSubscription.optIn();
+      for (let i = 0; i < 10 && !isReallySubscribed(OneSignal); i++) await new Promise(r => setTimeout(r, 500));
+      if (isReallySubscribed(OneSignal)) {
+        await OneSignal.User.addTag('role', 'admin');
+        setStatus('on');
+      } else {
+        setStatus('error'); setDetail('Permission granted but no subscription was created');
+      }
+    } catch (e) { setStatus('error'); setDetail(String(e?.message || e)); }
   };
 
   if (status === 'on') {
     return React.createElement('div', { style:{...FS,color:'#10b981',fontSize:11,marginBottom:24} }, '🔔 Sale notifications enabled on this device');
   }
+  const message = {
+    'ios-install': '🔔 On iPhone, notifications only work from the Home Screen app: tap Share → Add to Home Screen, open RNTECH from there, log in and tap Enable',
+    unsupported: '🔔 This browser doesn’t support push notifications',
+    error: `🔔 Couldn’t enable notifications${detail ? ` — ${detail}` : ''}`,
+  }[status] || '🔔 Get a push notification on this device whenever a ticket sells';
+  const showButton = status === 'off' || status === 'checking' || status === 'error';
   return React.createElement('div', { style:{background:'rgba(4,12,28,0.82)',backdropFilter:'blur(10px)',border:'1px solid rgba(255,255,255,0.06)',padding:'14px 18px',marginBottom:24,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:12} },
-    React.createElement('div', { style:{...FS,fontSize:12,color:'rgba(255,255,255,0.6)'} },
-      status==='error' ? '🔔 Subscription failed — fully close and reopen the app, then try again' : '🔔 Get a push notification on this device whenever a ticket sells'),
-    React.createElement('button', {
+    React.createElement('div', { style:{...FS,fontSize:12,color:'rgba(255,255,255,0.6)',flex:'1 1 220px'} }, message),
+    showButton && React.createElement('button', {
       onClick:enable, disabled:status==='checking',
       style:{...FS,padding:'8px 16px',border:'1px solid #3272a8',background:'rgba(50,114,168,0.2)',color:'#fff',fontSize:11,fontWeight:700,cursor:'pointer',textTransform:'uppercase',letterSpacing:'0.05em'}
-    }, status==='checking' ? 'Checking…' : 'Enable Notifications')
+    }, status==='checking' ? 'Checking…' : status==='error' ? 'Try Again' : 'Enable Notifications')
   );
 }
 
@@ -531,6 +599,7 @@ function TabOverview() {
   if (!stats) return React.createElement(Spinner);
   return React.createElement('div', null,
     React.createElement(SaleNotifications),
+    React.createElement(PhoneWidget),
     React.createElement('div', { className:'adm-counts', style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:16,marginBottom:40} },
       React.createElement(StatCard, { label:'Events', value:stats.events, color:'#3272a8' }),
       React.createElement(StatCard, { label:'Tickets Issued', value:stats.tickets, color:'#10b981' }),
@@ -664,6 +733,7 @@ function TabEvents() {
   const [saving, setSaving] = useState(false);
   const [posterFile, setPosterFile] = useState(null);
   const [ticketBannerFile, setTicketBannerFile] = useState(null);
+  const [heroVideoFile, setHeroVideoFile] = useState(null);
   const [ticketTypes, setTicketTypes] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [ttForm, setTtForm] = useState({ name:'',pricePounds:'0',capacity:100,description:'',active:true,isTiered:false,tiers:[{capacity:100,pricePounds:'0'}] });
@@ -677,6 +747,7 @@ function TabEvents() {
     setForm({ title:'',date:'',displayDate:'',startTime:'',endTime:'',venue:'The White Swan',location:'St Albans, Hertfordshire',description:'',ticketBio:'',lineup:'',giveaways:'',status:'upcoming',isFree:true,featured:false,registrationMode:'open' });
     setPosterFile(null);
     setTicketBannerFile(null);
+    setHeroVideoFile(null);
     setShowForm(true);
   };
 
@@ -694,6 +765,7 @@ function TabEvents() {
     });
     setPosterFile(null);
     setTicketBannerFile(null);
+    setHeroVideoFile(null);
     setShowForm(true);
   };
 
@@ -715,6 +787,7 @@ function TabEvents() {
       else ev = await window.RNTECH_API.createEvent(payload);
       if (posterFile) await window.RNTECH_API.uploadPoster(ev.id, posterFile);
       if (ticketBannerFile) await window.RNTECH_API.uploadTicketBanner(ev.id, ticketBannerFile);
+      if (heroVideoFile) await window.RNTECH_API.uploadHeroVideo(ev.id, heroVideoFile);
       setShowForm(false);
       load();
     } catch(err) { alert(err.message); }
@@ -835,6 +908,17 @@ function TabEvents() {
             )
           ),
           React.createElement('input', { type:'file',accept:'image/*',onChange:e=>setTicketBannerFile(e.target.files[0]),style:{...FS,color:'rgba(255,255,255,0.6)',fontSize:13} })
+        ),
+        React.createElement('div', { style:{marginBottom:14} },
+          React.createElement('label', { style:labelSt },'Home Hero Video (optional, short silent loop: plays on the homepage card instead of the poster)'),
+          editing&&editing.heroVideo&&React.createElement('div', { style:{display:'flex',alignItems:'center',gap:12,marginBottom:10} },
+            React.createElement('video', { src:editing.heroVideo,muted:true,loop:true,autoPlay:true,playsInline:true,style:{width:64,height:64,objectFit:'cover',borderRadius:4,border:'1px solid rgba(50,114,168,0.3)'} }),
+            React.createElement('div', null,
+              React.createElement('div', { style:{...FS,color:'rgba(255,255,255,0.5)',fontSize:12,marginBottom:6} },'Current video'),
+              React.createElement('button', { type:'button',onClick:async()=>{ if(!confirm('Remove hero video?')) return; await window.RNTECH_API.removeHeroVideo(editing.id); setEditing(ev=>({...ev,heroVideo:null})); },style:{...FS,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',cursor:'pointer',padding:'4px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'} },'Remove Video')
+            )
+          ),
+          React.createElement('input', { type:'file',accept:'video/mp4,video/webm,video/quicktime',onChange:e=>setHeroVideoFile(e.target.files[0]),style:{...FS,color:'rgba(255,255,255,0.6)',fontSize:13} })
         ),
         React.createElement(AdminTextarea, { label:'Lineup (one per line: NAME:Role:Instagram — instagram optional)',value:form.lineup,onChange:e=>setForm(f=>({...f,lineup:e.target.value})),rows:4,placeholder:'DJ MIDDO:Headliner:djmiddo\nBEN HENDERSON:Headliner\nDJ DAGZ:Support:dagbeni10' }),
         React.createElement(AdminTextarea, { label:'Giveaways (one per line)',value:form.giveaways,onChange:e=>setForm(f=>({...f,giveaways:e.target.value})),rows:3,placeholder:'Free entry all night\nBrewtini sampling' }),
@@ -1052,7 +1136,7 @@ function TabMixes() {
 }
 
 // ── QR Scanner Modal ──────────────────────────────────────────────────────────
-function QRScanModal({ onClose, onScan, eventId }) {
+function QRScanModal({ onClose, onScan, eventId, search }) {
   const videoRef = React.useRef(null);
   const canvasRef = React.useRef(null);
   const scanCanvasRef = React.useRef(null);
@@ -1074,7 +1158,7 @@ function QRScanModal({ onClose, onScan, eventId }) {
     if (q.length < 2) { setManualResults([]); return; }
     setManualLoading(true);
     const timer = setTimeout(() => {
-      window.RNTECH_API.searchTickets(q, eventId)
+      (search || window.RNTECH_API.searchTickets)(q, eventId)
         .then(r => { setManualResults(r.slice(0, 8)); setManualLoading(false); })
         .catch(() => setManualLoading(false));
     }, 300);
@@ -1280,7 +1364,9 @@ function doorMatches(t, terms) {
   return terms.every(w => hay.includes(w));
 }
 
-function TabDoor() {
+// Also runs as the door staff page (/door/<token>, see door.html): there `api` talks to the token-only
+// /api/door/... routes and the event is fixed, so nothing else in admin is reachable.
+function TabDoor({ api = window.RNTECH_API, lockedEvent = null }) {
   const [events, setEvents] = useState([]);
   const [eventId, setEventId] = useState('');
   const [tickets, setTickets] = useState(null);
@@ -1294,12 +1380,13 @@ function TabDoor() {
   const flashTimer = useRef(null);
 
   useEffect(() => {
-    window.RNTECH_API.getEvents().then(ev => { setEvents(ev); if (ev.length) setEventId(nextUpcomingId(ev)); }).catch(()=>{});
+    if (lockedEvent) { setEvents([lockedEvent]); setEventId(lockedEvent.id); return; }
+    api.getEvents().then(ev => { setEvents(ev); if (ev.length) setEventId(nextUpcomingId(ev)); }).catch(()=>{});
   }, []);
 
   const load = (id = eventId) => {
     if (!id) return Promise.resolve();
-    return window.RNTECH_API.adminTickets(id)
+    return api.adminTickets(id)
       .then(t => { setTickets(t.filter(x => x.status !== 'cancelled')); setOffline(false); })
       .catch(() => setOffline(true));
   };
@@ -1329,7 +1416,7 @@ function TabDoor() {
     const done = [], already = [];
     try {
       for (const t of valid) {
-        const r = await window.RNTECH_API.checkinByQR(t.qrCode);
+        const r = await (api.checkinTicket ? api.checkinTicket(t.id) : api.checkinByQR(t.qrCode));
         (r.alreadyUsed ? already : done).push(t.id);
       }
       setTickets(prev => prev.map(t => valid.some(v => v.id === t.id) ? { ...t, status:'used' } : t));
@@ -1350,7 +1437,7 @@ function TabDoor() {
 
   const undo = async (entry) => {
     try {
-      for (const id of entry.ticketIds) await window.RNTECH_API.updateTicketStatus(id, 'valid');
+      for (const id of entry.ticketIds) await (api.undoCheckin ? api.undoCheckin(id) : api.updateTicketStatus(id, 'valid'));
       setTickets(prev => prev.map(t => entry.ticketIds.includes(t.id) ? { ...t, status:'valid' } : t));
       setHistory(h => h.filter(x => x !== entry));
       setFlash(null);
@@ -1361,7 +1448,7 @@ function TabDoor() {
     setShowScanner(false);
     if (!code || !code.trim()) return showFlash({ kind:'error', name:'Scan failed', detail:'Could not read the QR code — try again or search by name' });
     try {
-      const r = await window.RNTECH_API.checkinByQR(code.trim());
+      const r = await api.checkinByQR(code.trim());
       if (r.eventId !== eventId) return showFlash({ kind:'error', name:r.holderName, detail:'This ticket is for '+r.eventTitle+', not this event' });
       if (r.alreadyUsed) return showFlash({ kind:'already', name:r.holderName, detail:'This ticket was already scanned in' });
       setTickets(prev => prev.map(t => t.id === r.id ? { ...t, status:'used' } : t));
@@ -1380,7 +1467,7 @@ function TabDoor() {
   if (terms.length && terms.join('').length >= 2) {
     const byKey = {};
     all.filter(t => doorMatches(t, terms)).forEach(t => {
-      const key = (t.holderEmail || t.holderName).toLowerCase();
+      const key = (t.groupKey || t.holderEmail || t.holderName).toLowerCase();
       if (!byKey[key]) groups.push(byKey[key] = { key, name:t.holderName, email:t.holderEmail, tickets:[] });
       byKey[key].tickets.push(t);
     });
@@ -1396,9 +1483,10 @@ function TabDoor() {
   const lastEntry = flash && flash.kind === 'in' ? history.find(h => h.ticketIds === flash.ticketIds) : null;
 
   return React.createElement('div', { className:'door' },
-    React.createElement('select', { value:eventId, onChange:e=>setEventId(e.target.value), style:{...inputSt,marginBottom:14} },
+    !lockedEvent && React.createElement('select', { value:eventId, onChange:e=>setEventId(e.target.value), style:{...inputSt,marginBottom:14} },
       events.map(ev=>React.createElement('option', { key:ev.id, value:ev.id, style:{background:'#040c18'} }, ev.title+(ev.displayDate?' — '+ev.displayDate:'')))
     ),
+    !lockedEvent && eventId && React.createElement(DoorStaffLink, { eventId }),
 
     // Live count
     React.createElement('div', { style:{background:'rgba(6,12,26,0.92)',border:'1px solid rgba(255,255,255,0.08)',padding:'14px 16px',marginBottom:14} },
@@ -1474,7 +1562,52 @@ function TabDoor() {
       React.createElement('p', { style:{...FS,color:'rgba(255,255,255,0.35)',fontSize:13,lineHeight:1.6,padding:'8px 2px'} },
         'Start typing someone\'s name — first name, surname, or both in any order. Each check-in clears the search ready for the next person.'),
 
-    showScanner && React.createElement(QRScanModal, { onClose:()=>setShowScanner(false), onScan:handleScan, eventId })
+    showScanner && React.createElement(QRScanModal, { onClose:()=>setShowScanner(false), onScan:handleScan, eventId, search:api.searchTickets })
+  );
+}
+
+// The secret link for whoever's on the door: opens 24h before the start, dies a few hours after the end.
+function DoorStaffLink({ eventId }) {
+  const [info, setInfo] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { setInfo(null); setErr(''); setCopied(false); }, [eventId]);
+  const fetchLink = (reset) => {
+    setErr('');
+    (reset ? window.RNTECH_API.resetDoorLink(eventId) : window.RNTECH_API.doorLink(eventId))
+      .then(i => { setInfo(i); setCopied(false); }).catch(e => setErr(e.message || 'Could not get the link'));
+  };
+  const toggle = () => { const next = !open; setOpen(next); if (next && !info) fetchLink(false); };
+  const when = iso => iso ? new Date(iso).toLocaleString('en-GB', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '—';
+  const copy = () => {
+    const done = () => { setCopied(true); setTimeout(() => setCopied(false), 2500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(info.url).then(done).catch(() => {}); else done();
+  };
+  const share = () => navigator.share ? navigator.share({ title:'RNTECH door', text:'Door check-in for tonight — open this on your phone:', url:info.url }).catch(()=>{}) : copy();
+  const btn = { ...FS, background:'rgba(50,114,168,0.15)', border:'1px solid rgba(50,114,168,0.5)', color:'#fff', padding:'10px 14px', fontSize:12, fontWeight:800, textTransform:'uppercase', letterSpacing:'0.06em', cursor:'pointer' };
+  return React.createElement('div', { style:{ border:'1px solid rgba(255,255,255,0.08)', background:'rgba(6,12,26,0.6)', marginBottom:14 } },
+    React.createElement('button', { onClick:toggle, style:{ ...FS, width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', background:'none', border:'none', color:'#fff', padding:'12px 16px', fontSize:14, fontWeight:700, cursor:'pointer', textAlign:'left' } },
+      '🔗  Door staff link', React.createElement('span', { style:{ color:'rgba(255,255,255,0.4)', fontSize:12 } }, open ? 'Hide' : 'Show')),
+    open && React.createElement('div', { style:{ padding:'0 16px 16px' } },
+      err && React.createElement('div', { style:{ ...FS, color:'#ef4444', fontSize:13, marginBottom:8 } }, err),
+      !info && !err && React.createElement('div', { style:{ ...FS, color:'rgba(255,255,255,0.5)', fontSize:13 } }, 'Getting link…'),
+      info && React.createElement(React.Fragment, null,
+        React.createElement('div', { style:{ ...FS, fontSize:13, color:'rgba(255,255,255,0.7)', lineHeight:1.6, marginBottom:10 } },
+          'Give this to whoever is on the door. It only shows this event\'s door check-in — nothing else — and works ',
+          React.createElement('b', { style:{ color:'#fff' } }, when(info.opensAt) + ' → ' + when(info.closesAt)), '. ',
+          info.state === 'open' ? React.createElement('span', { style:{ color:'#10b981', fontWeight:700 } }, 'Open now.')
+            : info.state === 'early' ? 'Not open yet.' : React.createElement('span', { style:{ color:'#f59e0b' } }, 'Closed.')),
+        React.createElement('input', { readOnly:true, value:info.url, onFocus:e=>e.target.select(), style:{ ...inputSt, fontSize:13 } }),
+        React.createElement('div', { style:{ display:'flex', gap:8, flexWrap:'wrap' } },
+          React.createElement('button', { onClick:copy, style:btn }, copied ? '✓ Copied' : 'Copy link'),
+          navigator.share && React.createElement('button', { onClick:share, style:btn }, 'Share'),
+          React.createElement('a', { href:info.url, target:'_blank', rel:'noopener', style:{ ...btn, textDecoration:'none', display:'inline-block' } }, 'Open'),
+          React.createElement('button', { onClick:() => { if (confirm('Make a new link? The old one stops working straight away.')) fetchLink(true); },
+            style:{ ...btn, background:'none', border:'1px solid rgba(239,68,68,0.4)', color:'#ef4444' } }, 'New link')
+        )
+      )
+    )
   );
 }
 

@@ -64,6 +64,11 @@ window.RNTECH_API = (function () {
       return postForm('/admin/events/' + eventId + '/ticket-banner', fd);
     },
     removeTicketBanner: (eventId) => del('/admin/events/' + eventId + '/ticket-banner'),
+    uploadHeroVideo: (eventId, file) => {
+      const fd = new FormData(); fd.append('file', file);
+      return postForm('/admin/events/' + eventId + '/hero-video', fd);
+    },
+    removeHeroVideo: (eventId) => del('/admin/events/' + eventId + '/hero-video'),
 
     // Ticket types
     createTicketType: (data) => post('/admin/ticket-types', data),
@@ -105,6 +110,10 @@ window.RNTECH_API = (function () {
     checkinByQR: (qrCode) => post('/admin/tickets/checkin/' + encodeURIComponent(qrCode), {}),
     exportTickets: (eventId) => BASE + '/admin/tickets/export' + (eventId ? '?event_id=' + eventId : '') + '&_auth=' + (token() || ''),
     updateTicketStatus: (id, status) => put('/admin/tickets/' + id + '/status', { status }),
+    doorLink: (eventId) => get('/admin/events/' + eventId + '/door-link'),
+    resetDoorLink: (eventId) => post('/admin/events/' + eventId + '/door-link/reset', {}),
+    widgetLink: () => get('/admin/widget-link'),
+    resetWidgetLink: () => post('/admin/widget-link/reset', {}),
     deleteTicket: (id) => del('/admin/tickets/' + id),
 
     // Mixes

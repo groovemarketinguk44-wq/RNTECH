@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#020810" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>RNTECH Door</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png" />
+  <link rel="apple-touch-icon" href="/static/favicon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="RNTECH Door" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { background: #020810; color: #fff; font-family: 'Space Grotesk', sans-serif; -webkit-font-smoothing: antialiased; }
+    .door-shell { max-width: 640px; margin: 0 auto; padding: max(16px, env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); }
+    .door-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .door-head h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: 0.02em; line-height: 1.2; }
+    .door-head .sub { font-size: 13px; color: rgba(255,255,255,0.5); margin-top: 4px; }
+    .door-tag { flex-shrink: 0; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #10b981; border: 1px solid rgba(16,185,129,0.5); padding: 5px 8px; }
+    .door-msg { margin-top: 18vh; text-align: center; padding: 28px 20px; border: 1px solid rgba(255,255,255,0.1); background: rgba(6,12,26,0.92); }
+    .door-msg h2 { margin: 0 0 8px; font-size: 22px; font-weight: 800; }
+    .door-msg p { margin: 0; color: rgba(255,255,255,0.65); font-size: 15px; line-height: 1.6; }
+    .door-msg .big { font-size: 36px; font-weight: 800; color: #fff; margin: 14px 0 4px; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<script src="/static/jsqr.js"></script>
+<script src="/static/ui.jsx"></script>
+<script src="/static/admin_pages.jsx"></script>
+<script>
+// Door staff page. The token in the URL is the only key: every call goes to /api/door/<token>/…,
+// which only ever touches this one event's tickets, and only while the door window is open.
+(function () {
+  const token = location.pathname.split('/').filter(Boolean)[1] || '';
+  const h = React.createElement;
+
+  async function call(method, path) {
+    const res = await fetch('/api/door/' + encodeURIComponent(token) + path, { method, cache: 'no-store' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { const e = new Error(typeof data.detail === 'string' ? data.detail : 'Something went wrong'); e.status = res.status; throw e; }
+    return data;
+  }
+  const doorApi = {
+    adminTickets: () => call('GET', '/tickets'),
+    checkinTicket: (id) => call('POST', '/checkin/ticket/' + encodeURIComponent(id)),
+    checkinByQR: (code) => call('POST', '/checkin/qr/' + encodeURIComponent(code)),
+    undoCheckin: (id) => call('POST', '/undo/' + encodeURIComponent(id)),
+    // Manual search inside the scanner works off the same list the page already has
+    searchTickets: (q) => call('GET', '/tickets').then(list => {
+      const terms = (q || '').toLowerCase().split(/\s+/).filter(Boolean);
+      return list.filter(t => terms.every(w => (t.holderName + ' ' + t.id).toLowerCase().includes(w)));
+    }),
+  };
+
+  const when = iso => new Date(iso).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  function countdown(iso) {
+    let s = Math.max(0, Math.round((new Date(iso) - Date.now()) / 1000));
+    const d = Math.floor(s / 86400); s %= 86400;
+    const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+    return (d ? d + 'd ' : '') + String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+  }
+
+  function DoorPage() {
+    const [info, setInfo] = React.useState(null);
+    const [error, setError] = React.useState('');
+    const [, tick] = React.useState(0);
+
+    const fetchInfo = () => call('GET', '').then(i => { setInfo(i); setError(''); })
+      .catch(e => setError(e.status === 404 ? 'bad' : (e.message || 'offline')));
+    React.useEffect(() => { fetchInfo(); }, []);
+    // Ticks the countdown, flips to open at the right moment and closes the list when the window ends
+    React.useEffect(() => {
+      const t = setInterval(() => {
+        tick(x => x + 1);
+        if (info && info.state === 'early' && new Date(info.opensAt) <= Date.now()) fetchInfo();
+        if (info && info.state === 'open' && new Date(info.closesAt) <= Date.now()) fetchInfo();
+      }, 1000);
+      return () => clearInterval(t);
+    }, [info]);
+
+    if (error === 'bad') return h('div', { className: 'door-shell' }, h('div', { className: 'door-msg' },
+      h('h2', null, 'Link not valid'), h('p', null, 'This door link doesn\'t work any more. Ask Ben for the new one.')));
+    if (!info) return h('div', { className: 'door-shell' }, error
+      ? h('div', { className: 'door-msg' }, h('h2', null, 'No connection'), h('p', null, 'Couldn\'t reach RNTECH — check signal and refresh.'))
+      : h('div', { style: { marginTop: '30vh', textAlign: 'center' } }, h(Spinner)));
+
+    const ev = info.event;
+    const head = h('div', { className: 'door-head' },
+      h('div', null, h('h1', null, ev.title), h('div', { className: 'sub' }, [ev.displayDate, ev.venue, ev.startTime && ev.startTime + (ev.endTime ? '–' + ev.endTime : '')].filter(Boolean).join(' · '))),
+      info.state === 'open' && h('div', { className: 'door-tag' }, 'Door'));
+
+    if (info.state === 'early') return h('div', { className: 'door-shell' }, head, h('div', { className: 'door-msg' },
+      h('h2', null, 'Door list opens soon'),
+      h('p', null, 'Opens ' + when(info.opensAt)),
+      h('div', { className: 'big' }, countdown(info.opensAt)),
+      h('p', null, 'Keep this page open — it unlocks by itself.')));
+    if (info.state === 'closed') return h('div', { className: 'door-shell' }, head, h('div', { className: 'door-msg' },
+      h('h2', null, 'Door list closed'), h('p', null, 'This event\'s door check-in has finished. Thanks for running the door!')));
+
+    return h('div', { className: 'door-shell' }, head,
+      h(TabDoor, { api: doorApi, lockedEvent: { id: ev.id, title: ev.title, displayDate: ev.displayDate } }));
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(h(DoorPage));
+})();
+</script>
+</body>
+</html>

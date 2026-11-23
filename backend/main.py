@@ -11,7 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text, inspect as sa_inspect
 from .database import engine, SessionLocal
 from .models import Base
-from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout, offers, promos, visitors, door, widget
+from .routes import auth_routes, events, mixes, tickets, contact, sponsors, admin, campaigns, inbox_routes, settings as settings_routes, checkout, offers, promos, visitors, door, widget, seo
 from .routes.campaigns import process_pending_sends, run_throttled_sends, scan_bounces
 from .routes.inbox_routes import sweep_side_folders_to_inbox
 
@@ -220,6 +220,9 @@ for router in [
     widget.router,
 ]:
     app.include_router(router, prefix="/api")
+
+# Event pages, sitemap.xml and robots.txt sit at the site root (no /api prefix) — see routes/seo.py
+app.include_router(seo.router)
 
 # ── Static file serving ───────────────────────────────────────────────────────
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

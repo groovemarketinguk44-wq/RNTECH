@@ -12,8 +12,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <meta name="apple-mobile-web-app-title" content="RNTECH" />
   <meta property="og:title" content="RNTECH - To The Stars" />
-  <meta property="og:description" content="RnB meets Tech House. St Albans." />
-  <meta name="description" content="RnB meets Tech House. St Albans." />
+  <meta property="og:description" content="RnB meets Tech House. Events in St Albans, Hitchin and across Hertfordshire." />
+  <meta name="description" content="RnB meets Tech House. Events in St Albans, Hitchin and across Hertfordshire." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Orbitron:wght@200;300;400;700&display=swap" rel="stylesheet" />
   <link href="https://fonts.cdnfonts.com/css/ethnocentric" rel="stylesheet" />
@@ -642,7 +642,9 @@ function App() {
 
   const [pendingEventIntent, setPendingEventIntent] = useState(() => {
     const path = window.location.pathname;
-    return path === '/buy' || QR_PATH.test(path) ? { eventId: 'featured', action: 'ticket' } : null;
+    // /buy?event=<id> (the Get Tickets button on each event page) opens that event; plain /buy opens the featured one
+    const ev = new URLSearchParams(window.location.search).get('event');
+    return path === '/buy' || QR_PATH.test(path) ? { eventId: ev || 'featured', action: 'ticket' } : null;
   }); // { eventId, action: 'ticket'|'detail' } — 'featured' resolves to the current featured event
 
   // Strip one-shot query params (invite/checkout/reset) and the /buy path from the URL after reading them
